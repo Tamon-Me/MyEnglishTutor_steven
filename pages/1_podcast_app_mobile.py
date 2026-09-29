@@ -1,6 +1,5 @@
 import json
 import os
-import time
 from google import genai
 from google.genai import types
 import streamlit as st
@@ -9,33 +8,129 @@ PODCAST_DATA_FILE = "podcast_history.json"
 
 # 모바일 호환 레이아웃 설정
 st.set_page_config(
-    page_title="CEFR 팟캐스트 스튜디오",
+    page_title="팟캐스트 생성",
     page_icon="🎧",
     layout="centered",
     initial_sidebar_state="expanded",
 )
 
-# 모바일 최적화 및 타이트한 대본 카드 커스텀 CSS
+# 모바일 최적화 및 하단 플로팅 카드 CSS (화면 고정/블러 없음)
 st.markdown(
     """
 <style>
-    .block-container { padding-top: 1.0rem; padding-bottom: 2rem; padding-left: 0.8rem; padding-right: 0.8rem; }
-    .stButton>button { width: 100%; border-radius: 8px; height: 2.8rem; font-weight: bold; }
+    /* 기본 스크롤 및 여백 (하단 바 공간 확보를 위해 padding-bottom 지정) */
+    html, body, [data-testid="stAppViewContainer"] {
+        overflow-x: hidden !important;
+    }
+    .block-container { 
+        padding-top: 1.0rem !important; 
+        padding-bottom: 7.0rem !important; /* 하단 팝업에 대본 마지막 내용이 가려지지 않도록 공간 확보 */
+        padding-left: 0.8rem !important; 
+        padding-right: 0.8rem !important; 
+        max-width: 100% !important;
+    }
+
+    /* 대본 카드 및 버튼 레이아웃 */
+    [data-testid="stHorizontalBlock"] {
+        align-items: center !important;
+        flex-wrap: nowrap !important;
+        gap: 6px !important;
+    }
     
-    /* 대본 카드 레이아웃 극대화 */
     .podcast-card {
         background-color: #f8f9fa;
         border-left: 4px solid #1E88E5;
-        padding: 8px 10px;
-        margin-bottom: 6px;
-        border-radius: 6px;
+        padding: 10px 12px;
+        border-radius: 8px;
     }
     .speaker-name { font-weight: bold; color: #1E88E5; font-size: 13px; margin-bottom: 2px; }
-    .script-en { font-size: 15px; line-height: 1.4; color: #212121; }
+    .script-en { font-size: 15px; line-height: 1.45; color: #212121; word-break: break-word; }
 
-    /* 사이드바 보관함 모바일 1줄 고정 */
-    [data-testid="column"] {
-        padding: 0px 2px !important;
+    /* ==========================================
+       🖤 메인 화면 영향 없는 하단 플로팅 팝업 카드
+       ========================================== */
+    .bottom-floating-card {
+        position: fixed;
+        bottom: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: calc(100% - 32px);
+        max-width: 720px; /* 고정 크기 대신 넓은 화면에서도 자연스럽게 확장되도록 조정 */
+        background-color: #1e1e24; /* 어두운 다크 톤 카드 */
+        border: 1px solid #33333e;
+        border-radius: 12px;
+        padding: 14px 16px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        z-index: 99998; /* 화면 최상단에 뜨지만 블러/배경 없음 */
+        box-sizing: border-box;
+        animation: slideUp 0.18s ease-out;
+    }
+
+    @keyframes slideUp {
+        from { transform: translate(-50%, 20px); opacity: 0; }
+        to { transform: translate(-50%, 0); opacity: 1; }
+    }
+
+    .floating-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+    }
+
+    .floating-card-title {
+        color: #64B5F6;
+        font-weight: bold;
+        font-size: 13px;
+    }
+
+    .floating-card-body {
+        color: #f1f3f5;
+        font-size: 14px;
+        line-height: 1.45;
+        word-break: break-word;
+    }
+
+    /* 팝업 내부 '✕ 닫기' 버튼 전용 고정 위치 CSS */
+    .floating-close-btn-wrapper {
+        position: fixed;
+        bottom: calc(16px + 14px + 18px); /* 팝업위치 + 패딩 + 높이 정렬 */
+        left: 50%;
+        transform: translateX(calc(-1 * (min(100vw - 32px, 720px) / 2 - 16px)));
+        z-index: 99999;
+    }
+
+    .floating-close-btn-wrapper .stButton > button {
+        background-color: #2b2b36 !important;
+        color: #e0e0e0 !important;
+        border: 1px solid #444454 !important;
+        padding: 2px 8px !important;
+        border-radius: 5px !important;
+        font-size: 12px !important;
+        font-weight: bold !important;
+        height: auto !important;
+        min-height: unset !important;
+        line-height: 1.2 !important;
+    }
+
+    .floating-close-btn-wrapper .stButton > button:hover {
+        background-color: #3a3a4a !important;
+        color: #ffffff !important;
+    }
+
+    /* 사이드바 스타일 */
+    [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
+        align-items: center !important;
+        flex-wrap: nowrap !important;
+        gap: 2px !important;
+    }
+    [data-testid="stSidebar"] .stButton>button {
+        padding: 2px 4px !important;
+        font-size: 11px !important;
+        height: 32px !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
 </style>
 """,
@@ -45,7 +140,7 @@ st.markdown(
 try:
     client = genai.Client()
 except Exception as e:
-    st.error("API 키를 확인해주세요. (GEMINI_API_KEY 환경 변수 필요)")
+    st.error("API 키를 확인해주세요. (GOOGLE_API_KEY 환경 변수 필요)")
 
 
 # 로컬 저장소 함수
@@ -73,6 +168,9 @@ if "current_podcast" not in st.session_state:
 
 if "show_settings" not in st.session_state:
     st.session_state.show_settings = True
+
+if "active_trans_index" not in st.session_state:
+    st.session_state.active_trans_index = None
 
 PODCAST_SYSTEM_PROMPT = """
 You are a professional podcast script writer for English learners.
@@ -136,7 +234,7 @@ def generate_podcast_script(level, topic_input, podcast_type, previous_topics):
     return json.loads(response.text)
 
 
-# --- 사이드바 (이전 대본 목록 관리 - 모바일 1줄 레이아웃 최적화) ---
+# --- 사이드바 (이전 대본 목록 관리) ---
 with st.sidebar:
     st.title("🎧 팟캐스트 스튜디오")
     st.divider()
@@ -150,13 +248,14 @@ with st.sidebar:
             item = st.session_state.podcast_history[idx]
             btn_label = f"[{item.get('level', 'A2')}] {item.get('title', '대본')}"
 
-            col_btn, col_del = st.columns([85, 15])
+            col_btn, col_del = st.columns([82, 18])
             with col_btn:
                 if st.button(
                     btn_label, key=f"load_p_{idx}", use_container_width=True
                 ):
                     st.session_state.current_podcast = item
                     st.session_state.show_settings = False
+                    st.session_state.active_trans_index = None
                     st.rerun()
 
             with col_del:
@@ -169,6 +268,7 @@ with st.sidebar:
                         == item.get("title")
                     ):
                         st.session_state.current_podcast = None
+                        st.session_state.active_trans_index = None
                     st.rerun()
 
         st.divider()
@@ -178,20 +278,23 @@ with st.sidebar:
             st.session_state.podcast_history = []
             save_podcast_history([])
             st.session_state.current_podcast = None
+            st.session_state.active_trans_index = None
             st.rerun()
 
 # --- 메인 화면 ---
-st.title("🎧 CEFR 팟캐스트 스튜디오")
+st.title("🎧 팟캐스트 생성")
 
-# 대본 설정 토글 헤더
-head_col1, head_col2 = st.columns([3, 1])
+# 대본 설정 헤더 및 접기/열기 버튼 (모바일 1줄 고정)
+head_col1, head_col2 = st.columns([75, 25])
 with head_col1:
     st.subheader("⚙️ 대본 설정")
 with head_col2:
     toggle_label = (
-        "🙈 설정 닫기" if st.session_state.show_settings else "⚙️ 설정 열기"
+        "🙈 닫기" if st.session_state.show_settings else "⚙️ 열기"
     )
-    if st.button(toggle_label, key="btn_toggle_settings"):
+    if st.button(
+        toggle_label, key="btn_toggle_settings", use_container_width=True
+    ):
         st.session_state.show_settings = not st.session_state.show_settings
         st.rerun()
 
@@ -229,7 +332,6 @@ if st.session_state.show_settings:
                     else "1-person monologue"
                 )
 
-                # 기존 스크립트 주제 수집 (중복 방지용)
                 prev_topics = [
                     f"{p.get('title', '')} ({p.get('topic', '')})"
                     for p in st.session_state.podcast_history
@@ -251,6 +353,7 @@ if st.session_state.show_settings:
                 save_podcast_history(st.session_state.podcast_history)
 
                 st.session_state.show_settings = False
+                st.session_state.active_trans_index = None
                 st.success("대본 생성이 완료되었습니다!")
                 st.rerun()
             except Exception as e:
@@ -258,9 +361,9 @@ if st.session_state.show_settings:
 
 st.divider()
 
-# --- 대본 출력 영역 (영문 위주 & 우측 작고 깔끔한 번역 버튼) ---
-if st.session_state.current_podcast:
-    podcast = st.session_state.current_podcast
+# --- 대본 출력 영역 ---
+podcast = st.session_state.current_podcast
+if podcast:
     st.markdown(f"### 📻 {podcast['title']}")
     st.caption(
         f"📌 **주제**: {podcast['topic']} | **난이도**: {podcast['level']}"
@@ -270,11 +373,9 @@ if st.session_state.current_podcast:
     for idx, item in enumerate(podcast["script"]):
         speaker = item.get("speaker", "Speaker")
         text_en = item.get("text_en", "")
-        text_ko = item.get("text_ko", "")
 
-        card_col, btn_col = st.columns([88, 12])
-
-        with card_col:
+        col_card, col_btn = st.columns([85, 15])
+        with col_card:
             st.markdown(
                 f"""
                 <div class="podcast-card">
@@ -285,10 +386,35 @@ if st.session_state.current_podcast:
                 unsafe_allow_html=True,
             )
 
-        with btn_col:
-            # 클릭 시 하단 작업표시줄 형태(Toast)로 번역 1줄 출력
-            if st.button("🔍", key=f"tr_btn_{idx}"):
-                st.toast(f"🇰🇷 **{speaker}**: {text_ko}", icon="🗣️")
+        with col_btn:
+            if st.button("🔍", key=f"trans_btn_{idx}"):
+                if st.session_state.active_trans_index == idx:
+                    st.session_state.active_trans_index = None
+                else:
+                    st.session_state.active_trans_index = idx
+                st.rerun()
+
+    # ==========================================
+    # 🖤 메인 화면 영향을 주지 않는 하단 플로팅 카카오톡 스타일 팝업
+    # ==========================================
+    if st.session_state.active_trans_index is not None:
+        active_idx = st.session_state.active_trans_index
+        if active_idx < len(podcast["script"]):
+            trans_info = podcast["script"][active_idx]
+            speaker = trans_info.get("speaker", "")
+            text_ko = trans_info.get("text_ko", "")
+
+            # 1. HTML 카드 배경 및 헤더 출력
+            floating_card_html = f"""
+            <div class="bottom-floating-card">
+                <div class="floating-card-header">
+                    <span class="floating-card-title">🇰🇷 {speaker} 번역</span>
+                </div>
+                <div class="floating-card-body">{text_ko}</div>
+            </div>
+            """
+            st.markdown(floating_card_html, unsafe_allow_html=True)
+
 
 else:
     st.info("상단에서 대본을 생성하거나, 왼쪽 보관함에서 대본을 선택해주세요.")
