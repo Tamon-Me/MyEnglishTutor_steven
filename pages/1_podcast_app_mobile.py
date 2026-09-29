@@ -15,16 +15,28 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# 모바일 커스텀 CSS (불필요한 패딩 및 여백 최소화)
+# 모바일 최적화 및 타이트한 대본 카드 커스텀 CSS
 st.markdown(
     """
 <style>
     .block-container { padding-top: 1.0rem; padding-bottom: 2rem; padding-left: 0.8rem; padding-right: 0.8rem; }
-    .stButton>button { width: 100%; border-radius: 12px; height: 3.2rem; font-weight: bold; }
-    .podcast-dialogue { background-color: #f8f9fa; border-left: 4px solid #1E88E5; padding: 12px 14px; margin-bottom: 6px; border-radius: 8px; }
-    .speaker-name { font-weight: bold; color: #1E88E5; font-size: 14px; margin-bottom: 4px; }
-    .script-en { font-size: 16px; line-height: 1.5; color: #212121; }
-    .streamlit-expanderHeader { font-size: 13px !important; color: #666 !important; padding-top: 0px !important; padding-bottom: 0px !important; }
+    .stButton>button { width: 100%; border-radius: 8px; height: 2.8rem; font-weight: bold; }
+    
+    /* 대본 카드 레이아웃 극대화 */
+    .podcast-card {
+        background-color: #f8f9fa;
+        border-left: 4px solid #1E88E5;
+        padding: 8px 10px;
+        margin-bottom: 6px;
+        border-radius: 6px;
+    }
+    .speaker-name { font-weight: bold; color: #1E88E5; font-size: 13px; margin-bottom: 2px; }
+    .script-en { font-size: 15px; line-height: 1.4; color: #212121; }
+
+    /* 사이드바 보관함 모바일 1줄 고정 */
+    [data-testid="column"] {
+        padding: 0px 2px !important;
+    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -64,16 +76,16 @@ if "show_settings" not in st.session_state:
 
 PODCAST_SYSTEM_PROMPT = """
 You are a professional podcast script writer for English learners.
-Generate an engaging, natural, 2-person dialogue podcast script based on the requested CEFR level and topic.
+Generate an engaging, natural podcast script based on the requested CEFR level and topic.
 
 Strict Output Rules:
 1. Output MUST be valid JSON format only, matching the exact schema below.
-2. Do not wrap the JSON in Markdown code fences if possible, or ensure it is strictly parseable JSON.
-3. Keep the target CEFR level guidelines strictly:
+2. Keep the target CEFR level guidelines strictly:
    - A1: Very simple present tense, short sentences, core everyday words.
    - A2: Oxford 3000 vocabulary, simple past/future, basic connectors.
    - B1: Broader vocabulary, express opinions, reasons, everyday stories.
    - B2: Richer expressions, abstract topics, natural idioms.
+3. NO DUPLICATE SPECIFIC EPISODES: You will be provided with previous topics. Do NOT reuse identical plot points or exact specific sub-topics. Change the story perspective, context, or angle completely.
 
 JSON Output Schema:
 {
@@ -92,17 +104,22 @@ JSON Output Schema:
 """
 
 
-def generate_podcast_script(level, topic_input, podcast_type):
+def generate_podcast_script(level, topic_input, podcast_type, previous_topics):
     topic_prompt = (
-        f"Topic: {topic_input}"
+        f"Requested Topic: {topic_input}"
         if topic_input
-        else "Topic: Daily life, interesting everyday experiences, or popular hobbies."
+        else "Requested Topic: Daily life, interesting everyday experiences, or popular hobbies."
     )
+
+    exclusion_clause = ""
+    if previous_topics:
+        exclusion_clause = f"\n[CRITICAL: DO NOT REPEAT THESE PREVIOUS EPISODES/TOPICS]\nPrevious Topics: {', '.join(previous_topics)}\nEnsure this new script has a fresh plot, new situation, or different angle."
 
     prompt = f"""
     Create a {podcast_type} podcast script.
     - CEFR Level: {level}
     - {topic_prompt}
+    {exclusion_clause}
     - Generate approximately 12-18 dialogue turns suitable for a ~3-5 minute engaging listening practice.
     """
 
@@ -111,7 +128,7 @@ def generate_podcast_script(level, topic_input, podcast_type):
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=PODCAST_SYSTEM_PROMPT,
-            temperature=0.7,
+            temperature=0.75,
             response_mime_type="application/json",
         ),
     )
@@ -119,27 +136,27 @@ def generate_podcast_script(level, topic_input, podcast_type):
     return json.loads(response.text)
 
 
-# --- 사이드바 (이전 대본 목록 관리) ---
+# --- 사이드바 (이전 대본 목록 관리 - 모바일 1줄 레이아웃 최적화) ---
 with st.sidebar:
     st.title("🎧 팟캐스트 스튜디오")
     st.divider()
 
     st.header("📚 저장된 대본 보관함")
     if not st.session_state.podcast_history:
-        st.info("저장된 팟캐스트 대본이 없습니다.")
+        st.info("저장된 대본이 없습니다.")
     else:
         total_p = len(st.session_state.podcast_history)
         for idx in range(total_p - 1, -1, -1):
             item = st.session_state.podcast_history[idx]
-            btn_label = f"📻 [{item.get('level', 'A2')}] {item.get('title', '대본')}"
+            btn_label = f"[{item.get('level', 'A2')}] {item.get('title', '대본')}"
 
-            col_btn, col_del = st.columns([4, 1])
+            col_btn, col_del = st.columns([85, 15])
             with col_btn:
                 if st.button(
                     btn_label, key=f"load_p_{idx}", use_container_width=True
                 ):
                     st.session_state.current_podcast = item
-                    st.session_state.show_settings = False  # 불러올 때도 설정 창 닫기
+                    st.session_state.show_settings = False
                     st.rerun()
 
             with col_del:
@@ -166,7 +183,7 @@ with st.sidebar:
 # --- 메인 화면 ---
 st.title("🎧 CEFR 팟캐스트 스튜디오")
 
-# 3. 대본 설정 헤더 및 우측 접기/열기 버튼
+# 대본 설정 토글 헤더
 head_col1, head_col2 = st.columns([3, 1])
 with head_col1:
     st.subheader("⚙️ 대본 설정")
@@ -178,7 +195,7 @@ with head_col2:
         st.session_state.show_settings = not st.session_state.show_settings
         st.rerun()
 
-# 설정 UI 영역 (조건부 출력)
+# 설정 UI 영역
 if st.session_state.show_settings:
     col1, col2 = st.columns(2)
     with col1:
@@ -197,13 +214,13 @@ if st.session_state.show_settings:
 
     topic_custom = st.text_input(
         "💡 주제 (선택 사항)",
-        placeholder="예: 주말 여행 계획, 카페 주문 등 (비워두면 자동 추천)",
+        placeholder="예: 카페 주문, 주말 여행 등 (비워두면 자동 추천)",
     )
 
     if st.button(
         "🚀 팟캐스트 대본 생성하기", type="primary", use_container_width=True
     ):
-        with st.spinner("AI 작가가 맞춤형 팟캐스트 대본을 작성 중입니다..."):
+        with st.spinner("AI 작가가 중복 없는 맞춤형 대본을 작성 중입니다..."):
             try:
                 level_code = selected_level.split(" ")[0]
                 p_type = (
@@ -212,8 +229,14 @@ if st.session_state.show_settings:
                     else "1-person monologue"
                 )
 
+                # 기존 스크립트 주제 수집 (중복 방지용)
+                prev_topics = [
+                    f"{p.get('title', '')} ({p.get('topic', '')})"
+                    for p in st.session_state.podcast_history
+                ]
+
                 result_json = generate_podcast_script(
-                    level_code, topic_custom, p_type
+                    level_code, topic_custom, p_type, prev_topics
                 )
 
                 podcast_data = {
@@ -223,12 +246,10 @@ if st.session_state.show_settings:
                     "script": result_json.get("script", []),
                 }
 
-                # 로컬에 데이터 저장 및 현재 대본 세팅
                 st.session_state.current_podcast = podcast_data
                 st.session_state.podcast_history.append(podcast_data)
                 save_podcast_history(st.session_state.podcast_history)
 
-                # 대본 생성 완료 후 자동으로 설정 패널 가리기
                 st.session_state.show_settings = False
                 st.success("대본 생성이 완료되었습니다!")
                 st.rerun()
@@ -237,7 +258,7 @@ if st.session_state.show_settings:
 
 st.divider()
 
-# --- 대본 출력 영역 ---
+# --- 대본 출력 영역 (영문 위주 & 우측 작고 깔끔한 번역 버튼) ---
 if st.session_state.current_podcast:
     podcast = st.session_state.current_podcast
     st.markdown(f"### 📻 {podcast['title']}")
@@ -246,28 +267,28 @@ if st.session_state.current_podcast:
     )
     st.write("")
 
-    st.caption(
-        "💡 각 문장 하단의 **'🔍 번역 확인'**을 누르면 한국어 뜻을 볼 수 있습니다."
-    )
-
     for idx, item in enumerate(podcast["script"]):
         speaker = item.get("speaker", "Speaker")
         text_en = item.get("text_en", "")
         text_ko = item.get("text_ko", "")
 
-        st.markdown(
-            f"""
-            <div class="podcast-dialogue">
-                <div class="speaker-name">🗣️ {speaker}</div>
-                <div class="script-en">{text_en}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        card_col, btn_col = st.columns([88, 12])
 
-        with st.expander("🔍 번역 확인", expanded=False):
-            st.caption(f"🇰🇷 {text_ko}")
+        with card_col:
+            st.markdown(
+                f"""
+                <div class="podcast-card">
+                    <div class="speaker-name">🗣️ {speaker}</div>
+                    <div class="script-en">{text_en}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-        st.write("")
+        with btn_col:
+            # 클릭 시 하단 작업표시줄 형태(Toast)로 번역 1줄 출력
+            if st.button("🔍", key=f"tr_btn_{idx}"):
+                st.toast(f"🇰🇷 **{speaker}**: {text_ko}", icon="🗣️")
+
 else:
     st.info("상단에서 대본을 생성하거나, 왼쪽 보관함에서 대본을 선택해주세요.")
