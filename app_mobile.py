@@ -13,7 +13,7 @@ st.set_page_config(
     page_title="영어 AI 튜터",
     page_icon="🎬",
     layout="centered",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",  # 사이드바 메뉴가 보이도록 설정
 )
 
 # 모바일 커스텀 CSS
@@ -146,7 +146,7 @@ def get_test_eval_prompt(difficulty):
 - Difficulty Level: High (Advanced)
 - Grade strictly with high expectations.
 - Evaluate for rich vocabulary, advanced clause/phrasal structures (relative clauses, conjunctions, complex modifiers), and highly natural native-level phrasing.
-"""
+""",
     }
 
     selected_guide = difficulty_instructions.get(difficulty, difficulty_instructions["중 (중급)"])
@@ -179,10 +179,11 @@ Required Response Format (Use exact markdown headers):
 (Repeat Q2, Q3... sequentially for all questions)
 """
 
-# --- [사이드바 (단어장)] ---
+
+# --- [사이드바 (메뉴 & 단어장)] ---
 with st.sidebar:
     st.title("🎬 영어 AI 튜터")
-    st.caption("이미지 리딩 단어장")
+    st.caption("좌측 상단 메뉴에서 팟캐스트 스튜디오로 이동할 수 있습니다.")
     st.divider()
 
     st.header("📚 나의 단어장")
@@ -222,9 +223,7 @@ with st.sidebar:
 # --- [메인 영역] ---
 st.title("🎬 영어 AI 튜터")
 
-tab1, tab2, tab3 = st.tabs(
-    ["🎲 자동 추천", "✏️ 직접 입력", "📝 실력 테스트"]
-)
+tab1, tab2, tab3 = st.tabs(["🎲 자동 추천", "✏️ 직접 입력", "📝 실력 테스트"])
 
 
 def generate_card(prompt_text, default_target="추천 주제"):
@@ -331,7 +330,7 @@ with tab2:
                     except Exception as e:
                         st.error(f"오류 발생: {e}")
 
-# --- TAB 3: 실력 테스트 (난이도 선택 기능 반영) ---
+# --- TAB 3: 실력 테스트 ---
 with tab3:
     st.subheader("📝 단어장 기반 실력 테스트")
     st.caption(
@@ -464,7 +463,7 @@ with tab3:
             st.markdown(st.session_state.test_results)
 
 
-# --- [학습 & 미션 영역 (기존 1개 미션 플로우 유지)] ---
+# --- [학습 & 미션 영역] ---
 if st.session_state.current_card:
     st.divider()
     card = st.session_state.current_card
