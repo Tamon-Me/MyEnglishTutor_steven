@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# 모바일 최적화 및 CSS (대본 카드 및 하이라이트)
+# CSS 스타일 및 자바스크립트
 st.markdown(
     """
 <style>
@@ -32,97 +32,129 @@ st.markdown(
         max-width: 100% !important;
     }
 
-    [data-testid="stHorizontalBlock"] {
-        align-items: center !important;
-        flex-wrap: nowrap !important;
-        gap: 6px !important;
+    /* 카드 컨테이너 */
+    .podcast-card-container {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
     }
-    
-    /* 기본 대본 카드 */
+
     .podcast-card {
+        flex: 1;
         background-color: #f8f9fa;
         border-left: 4px solid #1E88E5;
         padding: 10px 12px;
         border-radius: 8px;
-        transition: background-color 0.3s ease;
+        transition: all 0.2s ease;
     }
-    
-    /* 💡 읽고 있는 대본 하이라이트 (연한 노란색) */
-    .podcast-card-active {
+
+    /* 💡 클릭 시 활성화되는 노란색 하이라이트 */
+    .podcast-card.active-card {
         background-color: #FFF9C4 !important;
         border-left: 4px solid #FBC02D !important;
-        padding: 10px 12px;
-        border-radius: 8px;
-        transition: background-color 0.3s ease;
     }
 
     .speaker-name { font-weight: bold; color: #1E88E5; font-size: 13px; margin-bottom: 2px; }
     .script-en { font-size: 15px; line-height: 1.45; color: #212121; word-break: break-word; }
 
-    /* 하단 플로팅 팝업 카드 */
-    .bottom-floating-card {
+    /* 커스텀 버튼 스타일 */
+    .action-btn {
+        background-color: #f0f2f6;
+        border: 1px solid #dcdfe6;
+        border-radius: 6px;
+        padding: 8px 12px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: background 0.2s;
+    }
+    .action-btn:hover {
+        background-color: #e0e4ec;
+    }
+
+    /* 하단 플로팅 번역 팝업 */
+    #bottom-translation-popover {
+        display: none;
         position: fixed;
-        bottom: 16px;
+        bottom: 20px;
         left: 50%;
         transform: translateX(-50%);
         width: calc(100% - 32px);
         max-width: 720px;
         background-color: #1e1e24;
+        color: #ffffff;
         border: 1px solid #33333e;
         border-radius: 12px;
         padding: 14px 16px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-        z-index: 99998;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        z-index: 999999;
         box-sizing: border-box;
-        animation: slideUp 0.18s ease-out;
     }
 
-    @keyframes slideUp {
-        from { transform: translate(-50%, 20px); opacity: 0; }
-        to { transform: translate(-50%, 0); opacity: 1; }
-    }
-
-    .floating-card-header {
+    .popover-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
         margin-bottom: 6px;
-    }
-
-    .floating-card-title {
-        color: #64B5F6;
         font-weight: bold;
+        color: #64B5F6;
         font-size: 13px;
-        text-align: left;
     }
 
-    .floating-card-body {
-        color: #f1f3f5;
+    .popover-close {
+        cursor: pointer;
+        color: #aaa;
+        font-size: 16px;
+    }
+    .popover-close:hover { color: #fff; }
+
+    .popover-body {
         font-size: 14px;
         line-height: 1.45;
-        word-break: break-word;
-    }
-
-    [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
-        align-items: center !important;
-        flex-wrap: nowrap !important;
-        gap: 2px !important;
-    }
-    [data-testid="stSidebar"] .stButton>button {
-        padding: 2px 4px !important;
-        font-size: 11px !important;
-        height: 32px !important;
-        white-space: nowrap !important;
-        overflow: hidden !important;
-        text-overflow: ellipsis !important;
-    }
-
-    /* 라디오 버튼 커스텀 스타일 (버튼처럼 컴팩트하게) */
-    div[data-testid="stRadio"] > div {
-        flex-direction: row !important;
-        gap: 8px !important;
+        color: #f1f3f5;
     }
 </style>
+
+<!-- 프론트엔드 자바스크립트 로직 -->
+<script>
+function toggleHighlightAndTranslate(cardId, speaker, textKo) {
+    const card = document.getElementById(cardId);
+    const popover = document.getElementById('bottom-translation-popover');
+    const popoverSpeaker = document.getElementById('popover-speaker');
+    const popoverText = document.getElementById('popover-text');
+
+    // 이미 활성화된 카드를 다시 누른 경우 -> 팝업 닫기 & 색상 해제
+    if (card.classList.contains('active-card')) {
+        card.classList.remove('active-card');
+        popover.style.display = 'none';
+    } else {
+        // 기존 active 카드들 색상 초기화
+        document.querySelectorAll('.podcast-card').forEach(el => el.classList.remove('active-card'));
+        
+        // 현재 카드 하이라이트 적용
+        card.classList.add('active-card');
+        
+        // 팝업 데이터 갱신 및 표시
+        popoverSpeaker.innerText = '🇰🇷 ' + speaker + ' 번역';
+        popoverText.innerText = textKo;
+        popover.style.display = 'block';
+    }
+}
+
+function closePopover() {
+    document.getElementById('bottom-translation-popover').style.display = 'none';
+    document.querySelectorAll('.podcast-card').forEach(el => el.classList.remove('active-card'));
+}
+</script>
+
+<!-- 번역 팝업 엘리먼트 -->
+<div id="bottom-translation-popover">
+    <div class="popover-header">
+        <span id="popover-speaker">🇰🇷 번역</span>
+        <span class="popover-close" onclick="closePopover()">✖</span>
+    </div>
+    <div id="popover-text" class="popover-body"></div>
+</div>
 """,
     unsafe_allow_html=True,
 )
@@ -157,13 +189,9 @@ if "current_podcast" not in st.session_state:
 if "show_settings" not in st.session_state:
     st.session_state.show_settings = True
 
-if "active_trans_index" not in st.session_state:
-    st.session_state.active_trans_index = None
-
 if "active_audio_key" not in st.session_state:
     st.session_state.active_audio_key = None
 
-# ⚡ 기본 재생 속도 설정 (기본값: 1.0x)
 if "audio_speed" not in st.session_state:
     st.session_state.audio_speed = 1.0
 
@@ -178,7 +206,7 @@ Strict Output Rules:
    - A2: Oxford 3000 vocabulary, simple past/future, basic connectors.
    - B1: Broader vocabulary, express opinions, reasons, everyday stories.
    - B2: Richer expressions, abstract topics, natural idioms.
-3. NO DUPLICATE SPECIFIC EPISODES: You will be provided with previous topics. Do NOT reuse identical plot points or exact specific sub-topics. Change the story perspective, context, or angle completely.
+3. NO DUPLICATE SPECIFIC EPISODES: You will be provided with previous topics. Do NOT reuse identical plot points or exact specific sub-topics.
 
 JSON Output Schema:
 {
@@ -197,7 +225,6 @@ JSON Output Schema:
 """
 
 
-# Edge-TTS 단일 오디오 생성
 def generate_edge_audio_single(text, speaker="Alex"):
     voice = (
         "en-US-ChristopherNeural"
@@ -217,25 +244,22 @@ def generate_edge_audio_single(text, speaker="Alex"):
     try:
         return asyncio.run(_generate())
     except Exception as e:
-        st.error(f"오디오 생성 중 오류 발생: {e}")
+        st.error(f"오디오 생성 오류: {e}")
         return None
 
 
-# 전체 문장 오디오 한 번에 생성 (배열 반환)
 def generate_all_audio_chunks(script_list):
     async def _generate():
         chunks = []
         for item in script_list:
             speaker = item.get("speaker", "Alex")
             text_en = item.get("text_en", "")
-
             voice = (
                 "en-US-ChristopherNeural"
                 if speaker.strip().lower() == "alex"
                 else "en-US-JennyNeural"
             )
             communicate = edge_tts.Communicate(text_en, voice)
-
             fp = BytesIO()
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
@@ -248,11 +272,10 @@ def generate_all_audio_chunks(script_list):
     try:
         return asyncio.run(_generate())
     except Exception as e:
-        st.error(f"오디오 변환 중 오류 발생: {e}")
+        st.error(f"오디오 변환 오류: {e}")
         return []
 
 
-# 단일 오디오 재생 (속도 조절 적용)
 def play_hidden_single_audio(audio_fp, speed=1.0):
     audio_bytes = audio_fp.read()
     b64_audio = base64.b64encode(audio_bytes).decode("utf-8")
@@ -264,22 +287,12 @@ def play_hidden_single_audio(audio_fp, speed=1.0):
     <script>
         var player = document.getElementById('tts_player');
         player.playbackRate = {speed};
-        player.onended = function() {{
-            const buttons = window.parent.document.querySelectorAll('button');
-            for (let btn of buttons) {{
-                if (btn.innerText.includes('⏹️')) {{
-                    btn.click();
-                    break;
-                }}
-            }}
-        }};
     </script>
     """
     st.components.v1.html(js_code, height=0, width=0)
 
 
-# 🌟 순차 연결 재생 및 실시간 대본 하이라이트 스크립트 (속도 조절 적용)
-def play_continuous_audio_with_highlight(audio_b64_list, speed=1.0):
+def play_continuous_audio_pure(audio_b64_list, speed=1.0):
     json_audio = json.dumps(audio_b64_list)
 
     js_code = f"""
@@ -287,48 +300,11 @@ def play_continuous_audio_with_highlight(audio_b64_list, speed=1.0):
         const audioList = {json_audio};
         const playbackSpeed = {speed};
         let currentIndex = 0;
-        let currentAudio = null;
-
-        function updateHighlight(index) {{
-            const doc = window.parent.document;
-            const cards = doc.querySelectorAll('[data-script-card]');
-            
-            cards.forEach((card, idx) => {{
-                if (idx === index) {{
-                    card.classList.remove('podcast-card');
-                    card.classList.add('podcast-card-active');
-                }} else {{
-                    card.classList.remove('podcast-card-active');
-                    card.classList.add('podcast-card');
-                }}
-            }});
-        }}
-
-        function clearHighlights() {{
-            const doc = window.parent.document;
-            const cards = doc.querySelectorAll('[data-script-card]');
-            cards.forEach((card) => {{
-                card.classList.remove('podcast-card-active');
-                card.classList.add('podcast-card');
-            }});
-        }}
 
         function playNext() {{
-            if (currentIndex >= audioList.length) {{
-                clearHighlights();
-                const buttons = window.parent.document.querySelectorAll('button');
-                for (let btn of buttons) {{
-                    if (btn.innerText.includes('⏹️')) {{
-                        btn.click();
-                        break;
-                    }}
-                }}
-                return;
-            }}
+            if (currentIndex >= audioList.length) return;
 
-            updateHighlight(currentIndex);
-
-            currentAudio = new Audio('data:audio/mp3;base64,' + audioList[currentIndex]);
+            let currentAudio = new Audio('data:audio/mp3;base64,' + audioList[currentIndex]);
             currentAudio.playbackRate = playbackSpeed;
             currentAudio.play();
 
@@ -350,17 +326,18 @@ def generate_podcast_script(level, topic_input, podcast_type, previous_topics):
         if topic_input
         else "Requested Topic: Daily life, interesting everyday experiences, or popular hobbies."
     )
-
-    exclusion_clause = ""
-    if previous_topics:
-        exclusion_clause = f"\n[CRITICAL: DO NOT REPEAT THESE PREVIOUS EPISODES/TOPICS]\nPrevious Topics: {', '.join(previous_topics)}\nEnsure this new script has a fresh plot, new situation, or different angle."
+    exclusion_clause = (
+        f"\nPrevious Topics: {', '.join(previous_topics)}"
+        if previous_topics
+        else ""
+    )
 
     prompt = f"""
     Create a {podcast_type} podcast script.
     - CEFR Level: {level}
     - {topic_prompt}
     {exclusion_clause}
-    - Generate approximately 12-18 dialogue turns suitable for a ~3-5 minute engaging listening practice.
+    - Generate approximately 12-18 dialogue turns.
     """
 
     response = client.models.generate_content(
@@ -372,7 +349,6 @@ def generate_podcast_script(level, topic_input, podcast_type, previous_topics):
             response_mime_type="application/json",
         ),
     )
-
     return json.loads(response.text)
 
 
@@ -397,7 +373,6 @@ with st.sidebar:
                 ):
                     st.session_state.current_podcast = item
                     st.session_state.show_settings = False
-                    st.session_state.active_trans_index = None
                     st.session_state.active_audio_key = None
                     st.rerun()
 
@@ -411,20 +386,8 @@ with st.sidebar:
                         == item.get("title")
                     ):
                         st.session_state.current_podcast = None
-                        st.session_state.active_trans_index = None
                         st.session_state.active_audio_key = None
                     st.rerun()
-
-        st.divider()
-        if st.button(
-            "🔥 보관함 전체 삭제", type="primary", use_container_width=True
-        ):
-            st.session_state.podcast_history = []
-            save_podcast_history([])
-            st.session_state.current_podcast = None
-            st.session_state.active_trans_index = None
-            st.session_state.active_audio_key = None
-            st.rerun()
 
 # --- 메인 화면 ---
 st.title("🎧 팟캐스트 생성")
@@ -496,7 +459,6 @@ if st.session_state.show_settings:
                 save_podcast_history(st.session_state.podcast_history)
 
                 st.session_state.show_settings = False
-                st.session_state.active_trans_index = None
                 st.session_state.active_audio_key = None
                 st.success("대본 생성이 완료되었습니다!")
                 st.rerun()
@@ -512,9 +474,6 @@ if podcast:
         f"📌 **주제**: {podcast['topic']} | **난이도**: {podcast['level']}"
     )
 
-    # ==========================================
-    # ⚡ 안정적인 라디오 버튼 형태의 재생 속도 선택기
-    # ==========================================
     speed_col1, speed_col2 = st.columns([35, 65])
     with speed_col1:
         st.markdown("**⚡ 재생 속도 설정**")
@@ -522,7 +481,6 @@ if podcast:
         speed_labels = ["0.8x", "1.0x", "1.2x", "1.5x"]
         speed_values = [0.8, 1.0, 1.2, 1.5]
 
-        # 현재 저장된 속도의 인덱스 찾기
         current_idx = (
             speed_values.index(st.session_state.audio_speed)
             if st.session_state.audio_speed in speed_values
@@ -543,14 +501,11 @@ if podcast:
             st.session_state.audio_speed = new_speed
             st.rerun()
 
-    # ==========================================
-    # 🎧 전체 대본 연속 재생기 (속도 + 하이라이트)
-    # ==========================================
     full_audio_key = "full_podcast_audio"
     col_full_card, col_full_btn = st.columns([85, 15])
     with col_full_card:
         st.markdown(
-            f"**🎙️️ 전체 대본 한 번에 듣기 (속도: {st.session_state.audio_speed}x)**"
+            f"**🎙 전체 대본 한 번에 듣기 (속도: {st.session_state.audio_speed}x)**"
         )
     with col_full_btn:
         is_playing_full = st.session_state.active_audio_key == full_audio_key
@@ -566,44 +521,41 @@ if podcast:
             st.rerun()
 
     if st.session_state.active_audio_key == full_audio_key:
-        with st.spinner("문장별 오디오 생성 및 재생 준비 중..."):
+        with st.spinner("전체 오디오 재생 준비 중..."):
             audio_chunks = generate_all_audio_chunks(podcast["script"])
             if audio_chunks:
-                play_continuous_audio_with_highlight(
-                    audio_chunks, speed=st.session_state.audio_speed
+                play_continuous_audio_pure(
+                    audio_b64_list=audio_chunks,
+                    speed=st.session_state.audio_speed,
                 )
 
     st.divider()
 
-    # ==========================================
-    # 📜 문장별 대본 카드
-    # ==========================================
+    # --- 대본 목록 출력 ---
     for idx, item in enumerate(podcast["script"]):
         speaker = item.get("speaker", "Speaker")
         text_en = item.get("text_en", "")
+        text_ko = item.get("text_ko", "").replace("'", "\\'").replace('"', '\\"')
         item_audio_key = f"audio_{idx}"
 
         is_playing_this_sentence = (
             st.session_state.active_audio_key == item_audio_key
         )
-        card_class = (
-            "podcast-card-active"
-            if is_playing_this_sentence
-            else "podcast-card"
-        )
 
-        col_card, col_audio, col_trans = st.columns([70, 15, 15])
+        col_card, col_audio = st.columns([85, 15])
 
         with col_card:
-            st.markdown(
-                f"""
-                <div class="{card_class}" data-script-card="{idx}">
+            # 💡 자바스크립트로 직접 노란색 하이라이트 및 번역 팝업 제어
+            card_html = f"""
+            <div class="podcast-card-container">
+                <div id="card_{idx}" class="podcast-card">
                     <div class="speaker-name">🗣️ {speaker}</div>
                     <div class="script-en">{text_en}</div>
                 </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                <button class="action-btn" onclick="toggleHighlightAndTranslate('card_{idx}', '{speaker}', '{text_ko}')">🔍</button>
+            </div>
+            """
+            st.markdown(card_html, unsafe_allow_html=True)
 
         with col_audio:
             audio_btn_label = "⏹️" if is_playing_this_sentence else "🔊"
@@ -617,42 +569,13 @@ if podcast:
                     st.session_state.active_audio_key = item_audio_key
                 st.rerun()
 
-        with col_trans:
-            if st.button(
-                "🔍", key=f"trans_btn_{idx}", use_container_width=True
-            ):
-                if st.session_state.active_trans_index == idx:
-                    st.session_state.active_trans_index = None
-                else:
-                    st.session_state.active_trans_index = idx
-                st.rerun()
-
+        # 개별 오디오 재생 처리
         if is_playing_this_sentence:
             audio_fp = generate_edge_audio_single(text_en, speaker=speaker)
             if audio_fp:
                 play_hidden_single_audio(
                     audio_fp, speed=st.session_state.audio_speed
                 )
-
-    # ==========================================
-    # 🖤 하단 플로팅 번역 팝업 카드
-    # ==========================================
-    if st.session_state.active_trans_index is not None:
-        active_idx = st.session_state.active_trans_index
-        if active_idx < len(podcast["script"]):
-            trans_info = podcast["script"][active_idx]
-            speaker = trans_info.get("speaker", "")
-            text_ko = trans_info.get("text_ko", "")
-
-            floating_card_html = f"""
-            <div class="bottom-floating-card">
-                <div class="floating-card-header">
-                    <span class="floating-card-title">🇰🇷 {speaker} 번역</span>
-                </div>
-                <div class="floating-card-body">{text_ko}</div>
-            </div>
-            """
-            st.markdown(floating_card_html, unsafe_allow_html=True)
 
 else:
     st.info("상단에서 대본을 생성하거나, 왼쪽 보관함에서 대본을 선택해주세요.")
