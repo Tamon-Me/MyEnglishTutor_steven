@@ -117,7 +117,6 @@ st.markdown(
         text-overflow: ellipsis !important;
     }
 
-    /* 라디오 버튼 커스텀 스타일 (버튼처럼 컴팩트하게) */
     div[data-testid="stRadio"] > div {
         flex-direction: row !important;
         gap: 8px !important;
@@ -163,11 +162,9 @@ if "active_trans_index" not in st.session_state:
 if "active_audio_key" not in st.session_state:
     st.session_state.active_audio_key = None
 
-# ⚡ 기본 재생 속도 설정 (기본값: 1.0x)
 if "audio_speed" not in st.session_state:
     st.session_state.audio_speed = 1.0
 
-# 💡 전체 재생 시 하단 번역창 자동 보기 옵션
 if "auto_show_trans" not in st.session_state:
     st.session_state.auto_show_trans = True
 
@@ -201,7 +198,6 @@ JSON Output Schema:
 """
 
 
-# Edge-TTS 단일 오디오 생성
 def generate_edge_audio_single(text, speaker="Alex"):
     voice = (
         "en-US-ChristopherNeural"
@@ -225,7 +221,6 @@ def generate_edge_audio_single(text, speaker="Alex"):
         return None
 
 
-# 전체 문장 오디오 한 번에 생성 (배열 반환)
 def generate_all_audio_chunks(script_list):
     async def _generate():
         chunks = []
@@ -256,7 +251,6 @@ def generate_all_audio_chunks(script_list):
         return []
 
 
-# 단일 오디오 재생 (속도 조절 적용)
 def play_hidden_single_audio(audio_fp, speed=1.0):
     audio_bytes = audio_fp.read()
     b64_audio = base64.b64encode(audio_bytes).decode("utf-8")
@@ -282,7 +276,6 @@ def play_hidden_single_audio(audio_fp, speed=1.0):
     st.components.v1.html(js_code, height=0, width=0)
 
 
-# 🌟 순차 연결 재생 및 실시간 대본 하이라이트 + 자동 번역 스크립트
 def play_continuous_audio_with_highlight(script_list, audio_b64_list, speed=1.0, auto_trans=True):
     json_audio = json.dumps(audio_b64_list)
     json_script = json.dumps(script_list, ensure_ascii=False)
@@ -296,8 +289,16 @@ def play_continuous_audio_with_highlight(script_list, audio_b64_list, speed=1.0,
         let currentIndex = 0;
         let currentAudio = null;
 
+        function getTopDoc() {{
+            try {{
+                return window.top.document;
+            }} catch(e) {{
+                return window.parent.document;
+            }}
+        }}
+
         function updateHighlight(index) {{
-            const doc = window.parent.document;
+            const doc = getTopDoc();
             const cards = doc.querySelectorAll('[data-script-card]');
             
             cards.forEach((card, idx) => {{
@@ -310,14 +311,13 @@ def play_continuous_audio_with_highlight(script_list, audio_b64_list, speed=1.0,
                 }}
             }});
 
-            // 번역 자동 보기 옵션이 열려있는 경우 하단 번역 플로팅 갱신
             if (autoTransEnabled && scriptList[index]) {{
                 updateFloatingTranslation(scriptList[index].speaker, scriptList[index].text_ko);
             }}
         }}
 
         function updateFloatingTranslation(speaker, textKo) {{
-            const doc = window.parent.document;
+            const doc = getTopDoc();
             let floatingCard = doc.querySelector('.bottom-floating-card');
             
             if (!floatingCard) {{
@@ -334,21 +334,17 @@ def play_continuous_audio_with_highlight(script_list, audio_b64_list, speed=1.0,
             `;
         }}
 
-        // 하이라이트 및 자동 생성된 번역창 제거 (중지 / 재생 완료 시)
         function clearHighlights() {{
-            const doc = window.parent.document;
+            const doc = getTopDoc();
             const cards = doc.querySelectorAll('[data-script-card]');
             cards.forEach((card) => {{
                 card.classList.remove('podcast-card-active');
                 card.classList.add('podcast-card');
             }});
 
-            // 자동 번역 카드 제거
-            if (autoTransEnabled) {{
-                const floatingCard = doc.querySelector('.bottom-floating-card');
-                if (floatingCard) {{
-                    floatingCard.remove();
-                }}
+            const floatingCard = doc.querySelector('.bottom-floating-card');
+            if (floatingCard) {{
+                floatingCard.remove();
             }}
         }}
 
@@ -359,7 +355,7 @@ def play_continuous_audio_with_highlight(script_list, audio_b64_list, speed=1.0,
             }}
             clearHighlights();
             
-            const buttons = window.parent.document.querySelectorAll('button');
+            const buttons = getTopDoc().querySelectorAll('button');
             for (let btn of buttons) {{
                 if (btn.innerText.includes('⏹️')) {{
                     btn.click();
@@ -385,6 +381,12 @@ def play_continuous_audio_with_highlight(script_list, audio_b64_list, speed=1.0,
                 playNext();
             }};
         }}
+
+        // 언마운트 / 중지 시 자바스크립트 소멸 이벤트 감지하여 하이라이트 즉시 지우기
+        window.addEventListener('unload', function() {{
+            if (currentAudio) currentAudio.pause();
+            clearHighlights();
+        }});
 
         playNext();
     </script>
@@ -412,7 +414,7 @@ def generate_podcast_script(level, topic_input, podcast_type, previous_topics):
     """
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.5-flash-lite",
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=PODCAST_SYSTEM_PROMPT,
@@ -560,9 +562,6 @@ if podcast:
         f"📌 **주제**: {podcast['topic']} | **난이도**: {podcast['level']}"
     )
 
-    # ==========================================
-    # ⚡ 재생 속도 및 옵션 설정 영역
-    # ==========================================
     speed_col1, speed_col2 = st.columns([35, 65])
     with speed_col1:
         st.markdown("**⚡ 재생 속도 설정**")
@@ -590,16 +589,12 @@ if podcast:
             st.session_state.audio_speed = new_speed
             st.rerun()
 
-    # 💡 [포인트 2] 전체 재생 시 하단 번역창 자동 표시 옵션 체크박스
     st.session_state.auto_show_trans = st.checkbox(
         "🌐 전체 재생 시 하단 번역창 자동 표시",
         value=st.session_state.auto_show_trans,
         key="chk_auto_show_trans",
     )
 
-    # ==========================================
-    # 🎧 전체 대본 연속 재생기 (속도 + 하이라이트 + 자동 번역)
-    # ==========================================
     full_audio_key = "full_podcast_audio"
     col_full_card, col_full_btn = st.columns([85, 15])
     with col_full_card:
@@ -614,7 +609,6 @@ if podcast:
             full_btn_label, key="btn_full_audio", use_container_width=True
         ):
             if is_playing_full:
-                # [포인트 1] 강제 중지 시 active_audio_key 초기화
                 st.session_state.active_audio_key = None
             else:
                 st.session_state.active_audio_key = full_audio_key
@@ -633,9 +627,6 @@ if podcast:
 
     st.divider()
 
-    # ==========================================
-    # 📜 문장별 대본 카드
-    # ==========================================
     for idx, item in enumerate(podcast["script"]):
         speaker = item.get("speaker", "Speaker")
         text_en = item.get("text_en", "")
@@ -692,9 +683,6 @@ if podcast:
                     audio_fp, speed=st.session_state.audio_speed
                 )
 
-    # ==========================================
-    # 🖤 하단 플로팅 번역 팝업 카드 (수동 조회 시)
-    # ==========================================
     if st.session_state.active_trans_index is not None and st.session_state.active_audio_key != full_audio_key:
         active_idx = st.session_state.active_trans_index
         if active_idx < len(podcast["script"]):
@@ -712,30 +700,32 @@ if podcast:
             """
             st.markdown(floating_card_html, unsafe_allow_html=True)
 
-        # ==========================================
-        # 🧹 오디오 미재생 시 브라우저 잔상(하이라이트 & 번역창) 강제 정리 Cleanup 스크립트
-        # ==========================================
-        if st.session_state.active_audio_key is None:
-            cleanup_js = """
-            <script>
-                (function() {
-                    const doc = window.parent.document;
-                    
-                    // 1. 노란색 하이라이트 카드 클래스 원복
+    # ==========================================
+    # 🧹 [개선 핵심] 재생이 완전히 중지되었을 때 상시 감지형 Cleanup 스크립트
+    # ==========================================
+    if st.session_state.active_audio_key is None:
+        force_cleanup_js = """
+        <script>
+            (function clean() {
+                function getDoc() {
+                    try { return window.top.document; } catch(e) { return window.parent.document; }
+                }
+                const doc = getDoc();
+                if (doc) {
                     const cards = doc.querySelectorAll('[data-script-card]');
                     cards.forEach((card) => {
                         card.classList.remove('podcast-card-active');
                         card.classList.add('podcast-card');
                     });
-
-                    // 2. 전체 재생용 자동 번역 플로팅 카드 제거
                     const floatingCard = doc.querySelector('.bottom-floating-card');
                     if (floatingCard) {
                         floatingCard.remove();
                     }
-                })();
-            </script>
-            """
-            st.components.v1.html(cleanup_js, height=0, width=0)
+                }
+            })();
+        </script>
+        """
+        st.components.v1.html(force_cleanup_js, height=0, width=0)
+
 else:
     st.info("상단에서 대본을 생성하거나, 왼쪽 보관함에서 대본을 선택해주세요.")
