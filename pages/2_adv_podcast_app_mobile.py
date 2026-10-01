@@ -263,60 +263,47 @@ def play_hidden_single_audio(audio_fp, speed=1.0):
         var player = document.getElementById('tts_player');
         player.playbackRate = {speed};
         player.onended = function() {{
-            const buttons = window.parent.document.querySelectorAll('button');
-            for (let btn of buttons) {{
-                if (btn.innerText.includes('⏹️')) {{
-                    btn.click();
-                    break;
+            // 재생 끝나면 부모의 ⏹️ 버튼 클릭 유도
+            try {{
+                const buttons = window.parent.document.querySelectorAll('button');
+                for (let btn of buttons) {{
+                    if (btn.innerText.includes('⏹️')) {{
+                        btn.click();
+                        break;
+                    }}
                 }}
-            }}
+            }} catch(e) {{}}
         }};
     </script>
     """
     st.components.v1.html(js_code, height=0, width=0)
 
 
-# ==========================================
-# 1. 안전한 연속 재생 함수 (Iframe 보안 오류 제거)
-# ==========================================
-def play_continuous_audio_with_highlight(script_list, audio_b64_list, speed=1.0, auto_trans=True):
+def play_continuous_audio_pure(script_list, audio_b64_list, speed=1.0):
+    """순수 오디오 연속 재생만 담당하는 자바스크립트 (DOM 변경 제어 없음)"""
     json_audio = json.dumps(audio_b64_list)
-    json_script = json.dumps(script_list, ensure_ascii=False)
 
-    # Iframe 내부에서 안전하게 실행되는 자바스크립트
     js_code = f"""
     <script>
         const audioList = {json_audio};
-        const scriptList = {json_script};
         const playbackSpeed = {speed};
-        const autoTrans = {str(auto_trans).lower()};
         let currentIndex = 0;
         let currentAudio = null;
 
         function playNext() {{
             if (currentIndex >= audioList.length) {{
-                // 전체 재생 종료 시 중지 버튼 클릭 시도 (Iframe 내부에서 safe_click)
+                // 전체 재생 끝나면 중지 버튼 클릭 시도
                 try {{
-                    const btns = window.parent.document.querySelectorAll('button');
-                    for (let btn of btns) {{
+                    const buttons = window.parent.document.querySelectorAll('button');
+                    for (let btn of buttons) {{
                         if (btn.innerText.includes('⏹️')) {{
                             btn.click();
                             break;
                         }}
                     }}
-                }} catch(e) {{
-                    console.log("Parent DOM access limited");
-                }}
+                }} catch(e) {{}}
                 return;
             }}
-
-            // 부모 DOM으로 하이라이트 및 번역 메시지 안전 전송 (postMessage)
-            window.parent.postMessage({{
-                type: 'PODCAST_UPDATE',
-                index: currentIndex,
-                script: scriptList[currentIndex],
-                autoTrans: autoTrans
-            }}, '*');
 
             currentAudio = new Audio('data:audio/mp3;base64,' + audioList[currentIndex]);
             currentAudio.playbackRate = playbackSpeed;
@@ -333,74 +320,6 @@ def play_continuous_audio_with_highlight(script_list, audio_b64_list, speed=1.0,
     """
     st.components.v1.html(js_code, height=0, width=0)
 
-
-# ==========================================
-# 2. 메시지 수신 및 DOM 안전 변경 자바스크립트 (앱 최상단 1회 로드)
-# ==========================================
-st.markdown("""
-<script>
-    // Iframe에서 보낸 안전한 메시지를 받아 부모 DOM의 카드/번역창 변경
-    window.addEventListener('message', function(event) {
-        if (event.data && event.data.type === 'PODCAST_UPDATE') {
-            const idx = event.data.index;
-            const script = event.data.script;
-            const autoTrans = event.data.autoTrans;
-
-            // 1. 카드 하이라이트 변경
-            const cards = document.querySelectorAll('[data-script-card]');
-            cards.forEach((card, i) => {
-                if (i === idx) {
-                    card.classList.remove('podcast-card');
-                    card.classList.add('podcast-card-active');
-                    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                } else {
-                    card.classList.remove('podcast-card-active');
-                    card.classList.add('podcast-card');
-                }
-            });
-
-            // 2. 번역 플로팅 카드 업데이트
-            if (autoTrans && script) {
-                let floatingCard = document.querySelector('.bottom-floating-card');
-                if (!floatingCard) {
-                    floatingCard = document.createElement('div');
-                    floatingCard.className = 'bottom-floating-card';
-                    document.body.appendChild(floatingCard);
-                }
-                floatingCard.innerHTML = `
-                    <div class="floating-card-header">
-                        <span class="floating-card-title">🇰🇷 ${script.speaker} 번역</span>
-                    </div>
-                    <div class="floating-card-body">${script.text_ko}</div>
-                `;
-            }
-        }
-    });
-</script>
-""", unsafe_allow_html=True)
-
-
-# ==========================================
-# 3. 재생 중이 아닐 때 Cleanup 스크립트 (postMessage 기반)
-# ==========================================
-if st.session_state.active_audio_key is None:
-    st.markdown("""
-    <script>
-        (function() {
-            // 하이라이트 제거
-            const cards = document.querySelectorAll('[data-script-card]');
-            cards.forEach((card) => {
-                card.classList.remove('podcast-card-active');
-                card.classList.add('podcast-card');
-            });
-            // 번역창 제거
-            const floatingCard = document.querySelector('.bottom-floating-card');
-            if (floatingCard) {
-                floatingCard.remove();
-            }
-        })();
-    </script>
-    """, unsafe_allow_html=True)
 
 def generate_podcast_script(level, topic_input, podcast_type, previous_topics):
     topic_prompt = (
@@ -626,26 +545,33 @@ if podcast:
         with st.spinner("문장별 오디오 생성 및 재생 준비 중..."):
             audio_chunks = generate_all_audio_chunks(podcast["script"])
             if audio_chunks:
-                play_continuous_audio_with_highlight(
+                play_continuous_audio_pure(
                     script_list=podcast["script"],
                     audio_b64_list=audio_chunks,
                     speed=st.session_state.audio_speed,
-                    auto_trans=st.session_state.auto_show_trans,
                 )
 
     st.divider()
 
+    # --- 대본 목록 출력 ---
     for idx, item in enumerate(podcast["script"]):
         speaker = item.get("speaker", "Speaker")
         text_en = item.get("text_en", "")
         item_audio_key = f"audio_{idx}"
 
+        # 1. 단일 재생 중인지 확인
         is_playing_this_sentence = (
             st.session_state.active_audio_key == item_audio_key
         )
+        # 2. 전체 재생 중인지 확인
+        is_playing_full_now = (
+            st.session_state.active_audio_key == full_audio_key
+        )
+
+        # 💡 [핵심] 하이라이트 조건: 해당 문장을 단일 재생 중이거나, 전체 재생 중인 경우 파이썬 조건문으로 적용
         card_class = (
             "podcast-card-active"
-            if is_playing_this_sentence
+            if (is_playing_this_sentence or is_playing_full_now)
             else "podcast-card"
         )
 
@@ -654,7 +580,7 @@ if podcast:
         with col_card:
             st.markdown(
                 f"""
-                <div class="{card_class}" data-script-card="{idx}">
+                <div class="{card_class}">
                     <div class="speaker-name">🗣️ {speaker}</div>
                     <div class="script-en">{text_en}</div>
                 </div>
@@ -684,6 +610,7 @@ if podcast:
                     st.session_state.active_trans_index = idx
                 st.rerun()
 
+        # 개별 오디오 재생
         if is_playing_this_sentence:
             audio_fp = generate_edge_audio_single(text_en, speaker=speaker)
             if audio_fp:
@@ -691,7 +618,8 @@ if podcast:
                     audio_fp, speed=st.session_state.audio_speed
                 )
 
-    if st.session_state.active_trans_index is not None and st.session_state.active_audio_key != full_audio_key:
+    # 💡 [핵심] 하단 번역 팝업: active_audio_key가 None이 되면 이 조건문이 False가 되어 팝업 HTML 자체가 생성되지 않고 깨끗하게 사라짐
+    if st.session_state.active_trans_index is not None and st.session_state.active_audio_key is not None:
         active_idx = st.session_state.active_trans_index
         if active_idx < len(podcast["script"]):
             trans_info = podcast["script"][active_idx]
@@ -707,33 +635,6 @@ if podcast:
             </div>
             """
             st.markdown(floating_card_html, unsafe_allow_html=True)
-
-    # ==========================================
-    # 🧹 [개선 핵심] 재생이 완전히 중지되었을 때 상시 감지형 Cleanup 스크립트
-    # ==========================================
-    if st.session_state.active_audio_key is None:
-        force_cleanup_js = """
-        <script>
-            (function clean() {
-                function getDoc() {
-                    try { return window.top.document; } catch(e) { return window.parent.document; }
-                }
-                const doc = getDoc();
-                if (doc) {
-                    const cards = doc.querySelectorAll('[data-script-card]');
-                    cards.forEach((card) => {
-                        card.classList.remove('podcast-card-active');
-                        card.classList.add('podcast-card');
-                    });
-                    const floatingCard = doc.querySelector('.bottom-floating-card');
-                    if (floatingCard) {
-                        floatingCard.remove();
-                    }
-                }
-            })();
-        </script>
-        """
-        st.components.v1.html(force_cleanup_js, height=0, width=0)
 
 else:
     st.info("상단에서 대본을 생성하거나, 왼쪽 보관함에서 대본을 선택해주세요.")
