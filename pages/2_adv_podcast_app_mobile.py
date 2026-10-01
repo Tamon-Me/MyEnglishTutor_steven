@@ -167,6 +167,10 @@ if "active_audio_key" not in st.session_state:
 if "audio_speed" not in st.session_state:
     st.session_state.audio_speed = 1.0
 
+# 💡 전체 재생 시 하단 번역창 자동 보기 옵션
+if "auto_show_trans" not in st.session_state:
+    st.session_state.auto_show_trans = True
+
 PODCAST_SYSTEM_PROMPT = """
 You are a professional podcast script writer for English learners.
 Generate an engaging, natural podcast script based on the requested CEFR level and topic.
@@ -278,14 +282,17 @@ def play_hidden_single_audio(audio_fp, speed=1.0):
     st.components.v1.html(js_code, height=0, width=0)
 
 
-# 🌟 순차 연결 재생 및 실시간 대본 하이라이트 스크립트 (속도 조절 적용)
-def play_continuous_audio_with_highlight(audio_b64_list, speed=1.0):
+# 🌟 순차 연결 재생 및 실시간 대본 하이라이트 + 자동 번역 스크립트
+def play_continuous_audio_with_highlight(script_list, audio_b64_list, speed=1.0, auto_trans=True):
     json_audio = json.dumps(audio_b64_list)
+    json_script = json.dumps(script_list, ensure_ascii=False)
 
     js_code = f"""
     <script>
         const audioList = {json_audio};
+        const scriptList = {json_script};
         const playbackSpeed = {speed};
+        const autoTransEnabled = {str(auto_trans).lower()};
         let currentIndex = 0;
         let currentAudio = null;
 
@@ -302,8 +309,32 @@ def play_continuous_audio_with_highlight(audio_b64_list, speed=1.0):
                     card.classList.add('podcast-card');
                 }}
             }});
+
+            // 번역 자동 보기 옵션이 열려있는 경우 하단 번역 플로팅 갱신
+            if (autoTransEnabled && scriptList[index]) {{
+                updateFloatingTranslation(scriptList[index].speaker, scriptList[index].text_ko);
+            }}
         }}
 
+        function updateFloatingTranslation(speaker, textKo) {{
+            const doc = window.parent.document;
+            let floatingCard = doc.querySelector('.bottom-floating-card');
+            
+            if (!floatingCard) {{
+                floatingCard = doc.createElement('div');
+                floatingCard.className = 'bottom-floating-card';
+                doc.body.appendChild(floatingCard);
+            }}
+            
+            floatingCard.innerHTML = `
+                <div class="floating-card-header">
+                    <span class="floating-card-title">🇰🇷 ${{speaker}} 번역</span>
+                </div>
+                <div class="floating-card-body">${{textKo}}</div>
+            `;
+        }}
+
+        // 하이라이트 및 자동 생성된 번역창 제거 (중지 / 재생 완료 시)
         function clearHighlights() {{
             const doc = window.parent.document;
             const cards = doc.querySelectorAll('[data-script-card]');
@@ -311,18 +342,35 @@ def play_continuous_audio_with_highlight(audio_b64_list, speed=1.0):
                 card.classList.remove('podcast-card-active');
                 card.classList.add('podcast-card');
             }});
+
+            // 자동 번역 카드 제거
+            if (autoTransEnabled) {{
+                const floatingCard = doc.querySelector('.bottom-floating-card');
+                if (floatingCard) {{
+                    floatingCard.remove();
+                }}
+            }}
+        }}
+
+        function stopPlaybackAndReset() {{
+            if (currentAudio) {{
+                currentAudio.pause();
+                currentAudio = null;
+            }}
+            clearHighlights();
+            
+            const buttons = window.parent.document.querySelectorAll('button');
+            for (let btn of buttons) {{
+                if (btn.innerText.includes('⏹️')) {{
+                    btn.click();
+                    break;
+                }}
+            }}
         }}
 
         function playNext() {{
             if (currentIndex >= audioList.length) {{
-                clearHighlights();
-                const buttons = window.parent.document.querySelectorAll('button');
-                for (let btn of buttons) {{
-                    if (btn.innerText.includes('⏹️')) {{
-                        btn.click();
-                        break;
-                    }}
-                }}
+                stopPlaybackAndReset();
                 return;
             }}
 
@@ -513,7 +561,7 @@ if podcast:
     )
 
     # ==========================================
-    # ⚡ 안정적인 라디오 버튼 형태의 재생 속도 선택기
+    # ⚡ 재생 속도 및 옵션 설정 영역
     # ==========================================
     speed_col1, speed_col2 = st.columns([35, 65])
     with speed_col1:
@@ -522,7 +570,6 @@ if podcast:
         speed_labels = ["0.8x", "1.0x", "1.2x", "1.5x"]
         speed_values = [0.8, 1.0, 1.2, 1.5]
 
-        # 현재 저장된 속도의 인덱스 찾기
         current_idx = (
             speed_values.index(st.session_state.audio_speed)
             if st.session_state.audio_speed in speed_values
@@ -543,14 +590,21 @@ if podcast:
             st.session_state.audio_speed = new_speed
             st.rerun()
 
+    # 💡 [포인트 2] 전체 재생 시 하단 번역창 자동 표시 옵션 체크박스
+    st.session_state.auto_show_trans = st.checkbox(
+        "🌐 전체 재생 시 하단 번역창 자동 표시",
+        value=st.session_state.auto_show_trans,
+        key="chk_auto_show_trans",
+    )
+
     # ==========================================
-    # 🎧 전체 대본 연속 재생기 (속도 + 하이라이트)
+    # 🎧 전체 대본 연속 재생기 (속도 + 하이라이트 + 자동 번역)
     # ==========================================
     full_audio_key = "full_podcast_audio"
     col_full_card, col_full_btn = st.columns([85, 15])
     with col_full_card:
         st.markdown(
-            f"**🎙️️ 전체 대본 한 번에 듣기 (속도: {st.session_state.audio_speed}x)**"
+            f"**🎙 전체 대본 한 번에 듣기 (속도: {st.session_state.audio_speed}x)**"
         )
     with col_full_btn:
         is_playing_full = st.session_state.active_audio_key == full_audio_key
@@ -560,6 +614,7 @@ if podcast:
             full_btn_label, key="btn_full_audio", use_container_width=True
         ):
             if is_playing_full:
+                # [포인트 1] 강제 중지 시 active_audio_key 초기화
                 st.session_state.active_audio_key = None
             else:
                 st.session_state.active_audio_key = full_audio_key
@@ -570,7 +625,10 @@ if podcast:
             audio_chunks = generate_all_audio_chunks(podcast["script"])
             if audio_chunks:
                 play_continuous_audio_with_highlight(
-                    audio_chunks, speed=st.session_state.audio_speed
+                    script_list=podcast["script"],
+                    audio_b64_list=audio_chunks,
+                    speed=st.session_state.audio_speed,
+                    auto_trans=st.session_state.auto_show_trans,
                 )
 
     st.divider()
@@ -635,9 +693,9 @@ if podcast:
                 )
 
     # ==========================================
-    # 🖤 하단 플로팅 번역 팝업 카드
+    # 🖤 하단 플로팅 번역 팝업 카드 (수동 조회 시)
     # ==========================================
-    if st.session_state.active_trans_index is not None:
+    if st.session_state.active_trans_index is not None and st.session_state.active_audio_key != full_audio_key:
         active_idx = st.session_state.active_trans_index
         if active_idx < len(podcast["script"]):
             trans_info = podcast["script"][active_idx]
