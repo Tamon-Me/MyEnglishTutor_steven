@@ -47,7 +47,7 @@ st.markdown(
         transition: background-color 0.3s ease;
     }
     
-    /* 💡 읽고 있는 대본 하이라이트 (연한 노란색) */
+    /* 💡 선택/재생 중인 대본 하이라이트 (연한 노란색) */
     .podcast-card-active {
         background-color: #FFF9C4 !important;
         border-left: 4px solid #FBC02D !important;
@@ -263,7 +263,6 @@ def play_hidden_single_audio(audio_fp, speed=1.0):
         var player = document.getElementById('tts_player');
         player.playbackRate = {speed};
         player.onended = function() {{
-            // 재생 끝나면 부모의 ⏹️ 버튼 클릭 유도
             try {{
                 const buttons = window.parent.document.querySelectorAll('button');
                 for (let btn of buttons) {{
@@ -280,7 +279,6 @@ def play_hidden_single_audio(audio_fp, speed=1.0):
 
 
 def play_continuous_audio_pure(script_list, audio_b64_list, speed=1.0):
-    """순수 오디오 연속 재생만 담당하는 자바스크립트 (DOM 변경 제어 없음)"""
     json_audio = json.dumps(audio_b64_list)
 
     js_code = f"""
@@ -292,7 +290,6 @@ def play_continuous_audio_pure(script_list, audio_b64_list, speed=1.0):
 
         function playNext() {{
             if (currentIndex >= audioList.length) {{
-                // 전체 재생 끝나면 중지 버튼 클릭 시도
                 try {{
                     const buttons = window.parent.document.querySelectorAll('button');
                     for (let btn of buttons) {{
@@ -341,7 +338,7 @@ def generate_podcast_script(level, topic_input, podcast_type, previous_topics):
     """
 
     response = client.models.generate_content(
-        model="gemini-3.5-flash-lite",
+        model="gemini-2.5-flash",
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=PODCAST_SYSTEM_PROMPT,
@@ -516,12 +513,6 @@ if podcast:
             st.session_state.audio_speed = new_speed
             st.rerun()
 
-    st.session_state.auto_show_trans = st.checkbox(
-        "🌐 전체 재생 시 하단 번역창 자동 표시",
-        value=st.session_state.auto_show_trans,
-        key="chk_auto_show_trans",
-    )
-
     full_audio_key = "full_podcast_audio"
     col_full_card, col_full_btn = st.columns([85, 15])
     with col_full_card:
@@ -559,19 +550,17 @@ if podcast:
         text_en = item.get("text_en", "")
         item_audio_key = f"audio_{idx}"
 
-        # 1. 단일 재생 중인지 확인
+        # 1. 단일 문장이 재생 중이거나 선택된 경우에만 하이라이트 적용
         is_playing_this_sentence = (
             st.session_state.active_audio_key == item_audio_key
         )
-        # 2. 전체 재생 중인지 확인
-        is_playing_full_now = (
-            st.session_state.active_audio_key == full_audio_key
+        is_trans_selected = (
+            st.session_state.active_trans_index == idx
         )
 
-        # 💡 [핵심] 하이라이트 조건: 해당 문장을 단일 재생 중이거나, 전체 재생 중인 경우 파이썬 조건문으로 적용
         card_class = (
             "podcast-card-active"
-            if (is_playing_this_sentence or is_playing_full_now)
+            if (is_playing_this_sentence or is_trans_selected)
             else "podcast-card"
         )
 
@@ -618,8 +607,8 @@ if podcast:
                     audio_fp, speed=st.session_state.audio_speed
                 )
 
-    # 💡 [핵심] 하단 번역 팝업: active_audio_key가 None이 되면 이 조건문이 False가 되어 팝업 HTML 자체가 생성되지 않고 깨끗하게 사라짐
-    if st.session_state.active_trans_index is not None and st.session_state.active_audio_key is not None:
+    # 💡 [핵심] 하단 번역 팝업: 🔍 버튼을 눌러 active_trans_index가 설정된 경우 팝업 띄우기
+    if st.session_state.active_trans_index is not None:
         active_idx = st.session_state.active_trans_index
         if active_idx < len(podcast["script"]):
             trans_info = podcast["script"][active_idx]
