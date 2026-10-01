@@ -1,9 +1,10 @@
+import asyncio
 import json
 import os
 from io import BytesIO
 from google import genai
 from google.genai import types
-from gtts import gTTS
+import edge_tts
 import streamlit as st
 
 PODCAST_DATA_FILE = "podcast_history.json"
@@ -20,13 +21,13 @@ st.set_page_config(
 st.markdown(
     """
 <style>
-    /* 기본 스크롤 및 여백 (하단 바 공간 확보를 위해 padding-bottom 지정) */
+    /* 기본 스크롤 및 여백 */
     html, body, [data-testid="stAppViewContainer"] {
         overflow-x: hidden !important;
     }
     .block-container { 
         padding-top: 1.0rem !important; 
-        padding-bottom: 7.0rem !important; /* 하단 팝업에 대본 마지막 내용이 가려지지 않도록 공간 확보 */
+        padding-bottom: 7.0rem !important; 
         padding-left: 0.8rem !important; 
         padding-right: 0.8rem !important; 
         max-width: 100% !important;
@@ -48,9 +49,7 @@ st.markdown(
     .speaker-name { font-weight: bold; color: #1E88E5; font-size: 13px; margin-bottom: 2px; }
     .script-en { font-size: 15px; line-height: 1.45; color: #212121; word-break: break-word; }
 
-    /* ==========================================
-       🖤 메인 화면 영향 없는 하단 플로팅 팝업 카드
-       ========================================== */
+    /* 메인 화면 영향 없는 하단 플로팅 팝업 카드 */
     .bottom-floating-card {
         position: fixed;
         bottom: 16px;
@@ -84,7 +83,7 @@ st.markdown(
         color: #64B5F6;
         font-weight: bold;
         font-size: 13px;
-        text-align: left; /* 좌측 정렬 */
+        text-align: left;
     }
 
     .floating-card-body {
@@ -149,7 +148,7 @@ if "active_trans_index" not in st.session_state:
     st.session_state.active_trans_index = None
 
 if "active_audio_key" not in st.session_state:
-    st.session_state.active_audio_key = None  # 오디오 재생 상태 키 초기화
+    st.session_state.active_audio_key = None
 
 PODCAST_SYSTEM_PROMPT = """
 You are a professional podcast script writer for English learners.
@@ -181,16 +180,57 @@ JSON Output Schema:
 """
 
 
-# gTTS 오디오 생성 함수 (메모리 내 변환)
-def generate_gtts_audio(text, lang="en"):
-    try:
+# Edge-TTS 오디오 생성 함수 (단일 문장/화자별 남녀 목소리 지정)
+def generate_edge_audio_single(text, speaker="Alex"):
+    # 화자에 따른 음성 선택 (Alex: 남성 / Host 등 그 외: 여성)
+    voice = (
+        "en-US-ChristopherNeural"
+        if speaker.strip().lower() == "alex"
+        else "en-US-JennyNeural"
+    )
+
+    async def _generate():
+        communicate = edge_tts.Communicate(text, voice)
         fp = BytesIO()
-        tts = gTTS(text=text, lang=lang, slow=False)
-        tts.write_to_fp(fp)
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                fp.write(chunk["data"])
         fp.seek(0)
         return fp
+
+    try:
+        return asyncio.run(_generate())
     except Exception as e:
-        st.error(f"오디오 생성 중 오류 발생: {e}")
+        st.error(f"오디오 생성 중 오류가 발생했습니다: {e}")
+        return None
+
+
+# Edge-TTS 오디오 생성 함수 (전체 대본 - 화자별 목소리 변경 후 통합)
+def generate_edge_audio_full(script_list):
+    async def _generate():
+        combined_fp = BytesIO()
+        for item in script_list:
+            speaker = item.get("speaker", "Alex")
+            text_en = item.get("text_en", "")
+
+            voice = (
+                "en-US-ChristopherNeural"
+                if speaker.strip().lower() == "alex"
+                else "en-US-JennyNeural"
+            )
+            communicate = edge_tts.Communicate(text_en, voice)
+
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    combined_fp.write(chunk["data"])
+
+        combined_fp.seek(0)
+        return combined_fp
+
+    try:
+        return asyncio.run(_generate())
+    except Exception as e:
+        st.error(f"전체 오디오 합성 중 오류가 발생했습니다: {e}")
         return None
 
 
@@ -214,7 +254,7 @@ def generate_podcast_script(level, topic_input, podcast_type, previous_topics):
     """
 
     response = client.models.generate_content(
-        model="gemini-3.5-flash-lite",
+        model="gemini-2.5-flash",
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=PODCAST_SYSTEM_PROMPT,
@@ -285,7 +325,7 @@ with head_col1:
     st.subheader("⚙️ 대본 설정")
 with head_col2:
     toggle_label = (
-        "🙈 닫기" if st.session_state.show_settings else "⚙️️ 열기"
+        "🙈 닫기" if st.session_state.show_settings else "⚙️ 열기"
     )
     if st.button(
         toggle_label, key="btn_toggle_settings", use_container_width=True
@@ -366,12 +406,12 @@ if podcast:
     )
 
     # ==========================================
-    # 🎧 전체 대본 통합 오디오 재생기
+    # 🎧 전체 대본 통합 오디오 재생기 (Edge-TTS 적용)
     # ==========================================
     full_audio_key = "full_podcast_audio"
     col_full_card, col_full_btn = st.columns([85, 15])
     with col_full_card:
-        st.markdown("**🎙️ 전체 대본 한 번에 듣기**")
+        st.markdown("**🎙️ 전체 대본 한 번에 듣기 (Edge-TTS)**")
     with col_full_btn:
         is_playing_full = st.session_state.active_audio_key == full_audio_key
         full_btn_label = "⏹️" if is_playing_full else "🎧"
@@ -385,15 +425,12 @@ if podcast:
                 st.session_state.active_audio_key = full_audio_key
             st.rerun()
 
-    # 전체 오디오 재생 실행
+    # 전체 오디오 순차 생성 및 재생 (says 문구 제거 및 화자별 음성 전환)
     if st.session_state.active_audio_key == full_audio_key:
-        full_text = ". ".join([
-            f"{item.get('speaker', '')} says, {item.get('text_en', '')}"
-            for item in podcast["script"]
-        ])
-        audio_fp = generate_gtts_audio(full_text)
-        if audio_fp:
-            st.audio(audio_fp, format="audio/mp3", autoplay=True)
+        with st.spinner("다중 화자 고품질 오디오 생성 중..."):
+            audio_fp = generate_edge_audio_full(podcast["script"])
+            if audio_fp:
+                st.audio(audio_fp, format="audio/mp3", autoplay=True)
 
     st.divider()
 
@@ -443,14 +480,14 @@ if podcast:
                     st.session_state.active_trans_index = idx
                 st.rerun()
 
-        # 현재 선택된 문장 오디오만 재생 (동시 재생 방지)
+        # 현재 선택된 문장 오디오만 재생 (화자에 따른 남/여 voice 적용)
         if st.session_state.active_audio_key == item_audio_key:
-            audio_fp = generate_gtts_audio(text_en)
+            audio_fp = generate_edge_audio_single(text_en, speaker=speaker)
             if audio_fp:
                 st.audio(audio_fp, format="audio/mp3", autoplay=True)
 
     # ==========================================
-    # 🖤 하단 플로팅 번역 팝업 카드 (닫기 버튼 없음)
+    # 🖤 하단 플로팅 번역 팝업 카드 (닫기 버튼 제거됨)
     # ==========================================
     if st.session_state.active_trans_index is not None:
         active_idx = st.session_state.active_trans_index
