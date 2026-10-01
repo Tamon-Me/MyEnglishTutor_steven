@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import os
 from io import BytesIO
@@ -9,7 +10,6 @@ import streamlit as st
 
 PODCAST_DATA_FILE = "podcast_history.json"
 
-# 모바일 호환 레이아웃 설정
 st.set_page_config(
     page_title="팟캐스트 생성",
     page_icon="🎧",
@@ -17,11 +17,10 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# 모바일 최적화 및 하단 플로팅 카드 CSS (화면 고정/블러 없음)
+# 모바일 최적화 및 CSS (대본 카드 및 하이라이트)
 st.markdown(
     """
 <style>
-    /* 기본 스크롤 및 여백 */
     html, body, [data-testid="stAppViewContainer"] {
         overflow-x: hidden !important;
     }
@@ -33,23 +32,34 @@ st.markdown(
         max-width: 100% !important;
     }
 
-    /* 대본 카드 및 버튼 레이아웃 */
     [data-testid="stHorizontalBlock"] {
         align-items: center !important;
         flex-wrap: nowrap !important;
         gap: 6px !important;
     }
     
+    /* 기본 대본 카드 */
     .podcast-card {
         background-color: #f8f9fa;
         border-left: 4px solid #1E88E5;
         padding: 10px 12px;
         border-radius: 8px;
+        transition: background-color 0.3s ease;
     }
+    
+    /* 💡 읽고 있는 대본 하이라이트 (연한 노란색) */
+    .podcast-card-active {
+        background-color: #FFF9C4 !important;
+        border-left: 4px solid #FBC02D !important;
+        padding: 10px 12px;
+        border-radius: 8px;
+        transition: background-color 0.3s ease;
+    }
+
     .speaker-name { font-weight: bold; color: #1E88E5; font-size: 13px; margin-bottom: 2px; }
     .script-en { font-size: 15px; line-height: 1.45; color: #212121; word-break: break-word; }
 
-    /* 메인 화면 영향 없는 하단 플로팅 팝업 카드 */
+    /* 하단 플로팅 팝업 카드 */
     .bottom-floating-card {
         position: fixed;
         bottom: 16px;
@@ -93,7 +103,6 @@ st.markdown(
         word-break: break-word;
     }
 
-    /* 사이드바 스타일 */
     [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
         align-items: center !important;
         flex-wrap: nowrap !important;
@@ -118,7 +127,6 @@ except Exception as e:
     st.error("API 키를 확인해주세요. (GOOGLE_API_KEY 환경 변수 필요)")
 
 
-# 로컬 저장소 함수
 def load_podcast_history():
     if os.path.exists(PODCAST_DATA_FILE):
         try:
@@ -134,7 +142,6 @@ def save_podcast_history(history):
         json.dump(history, f, ensure_ascii=False, indent=2)
 
 
-# Session State 초기화
 if "podcast_history" not in st.session_state:
     st.session_state.podcast_history = load_podcast_history()
 
@@ -149,6 +156,10 @@ if "active_trans_index" not in st.session_state:
 
 if "active_audio_key" not in st.session_state:
     st.session_state.active_audio_key = None
+
+# ⚡ 기본 재생 속도 설정 (기본값: 1.0x)
+if "audio_speed" not in st.session_state:
+    st.session_state.audio_speed = 1.0
 
 PODCAST_SYSTEM_PROMPT = """
 You are a professional podcast script writer for English learners.
@@ -180,9 +191,8 @@ JSON Output Schema:
 """
 
 
-# Edge-TTS 오디오 생성 함수 (단일 문장/화자별 남녀 목소리 지정)
+# Edge-TTS 단일 오디오 생성
 def generate_edge_audio_single(text, speaker="Alex"):
-    # 화자에 따른 음성 선택 (Alex: 남성 / Host 등 그 외: 여성)
     voice = (
         "en-US-ChristopherNeural"
         if speaker.strip().lower() == "alex"
@@ -201,14 +211,14 @@ def generate_edge_audio_single(text, speaker="Alex"):
     try:
         return asyncio.run(_generate())
     except Exception as e:
-        st.error(f"오디오 생성 중 오류가 발생했습니다: {e}")
+        st.error(f"오디오 생성 중 오류 발생: {e}")
         return None
 
 
-# Edge-TTS 오디오 생성 함수 (전체 대본 - 화자별 목소리 변경 후 통합)
-def generate_edge_audio_full(script_list):
+# 전체 문장 오디오 한 번에 생성 (배열 반환)
+def generate_all_audio_chunks(script_list):
     async def _generate():
-        combined_fp = BytesIO()
+        chunks = []
         for item in script_list:
             speaker = item.get("speaker", "Alex")
             text_en = item.get("text_en", "")
@@ -220,18 +230,112 @@ def generate_edge_audio_full(script_list):
             )
             communicate = edge_tts.Communicate(text_en, voice)
 
+            fp = BytesIO()
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
-                    combined_fp.write(chunk["data"])
-
-        combined_fp.seek(0)
-        return combined_fp
+                    fp.write(chunk["data"])
+            fp.seek(0)
+            b64 = base64.b64encode(fp.read()).decode("utf-8")
+            chunks.append(b64)
+        return chunks
 
     try:
         return asyncio.run(_generate())
     except Exception as e:
-        st.error(f"전체 오디오 합성 중 오류가 발생했습니다: {e}")
-        return None
+        st.error(f"오디오 변환 중 오류 발생: {e}")
+        return []
+
+
+# 단일 오디오 재생 (속도 조절 적용)
+def play_hidden_single_audio(audio_fp, speed=1.0):
+    audio_bytes = audio_fp.read()
+    b64_audio = base64.b64encode(audio_bytes).decode("utf-8")
+
+    js_code = f"""
+    <audio id="tts_player" style="display:none;" autoplay>
+        <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
+    </audio>
+    <script>
+        var player = document.getElementById('tts_player');
+        player.playbackRate = {speed}; // ⚡ 속도 설정
+        player.onended = function() {{
+            const buttons = window.parent.document.querySelectorAll('button');
+            for (let btn of buttons) {{
+                if (btn.innerText.includes('⏹️')) {{
+                    btn.click();
+                    break;
+                }}
+            }}
+        }};
+    </script>
+    """
+    st.components.v1.html(js_code, height=0, width=0)
+
+
+# 🌟 순차 연결 재생 및 실시간 대본 하이라이트 스크립트 (속도 조절 적용)
+def play_continuous_audio_with_highlight(audio_b64_list, speed=1.0):
+    json_audio = json.dumps(audio_b64_list)
+
+    js_code = f"""
+    <script>
+        const audioList = {json_audio};
+        const playbackSpeed = {speed}; // ⚡ 지정된 재생 속도
+        let currentIndex = 0;
+        let currentAudio = null;
+
+        function updateHighlight(index) {{
+            const doc = window.parent.document;
+            const cards = doc.querySelectorAll('[data-script-card]');
+            
+            cards.forEach((card, idx) => {{
+                if (idx === index) {{
+                    card.classList.remove('podcast-card');
+                    card.classList.add('podcast-card-active');
+                }} else {{
+                    card.classList.remove('podcast-card-active');
+                    card.classList.add('podcast-card');
+                }}
+            }});
+        }}
+
+        function clearHighlights() {{
+            const doc = window.parent.document;
+            const cards = doc.querySelectorAll('[data-script-card]');
+            cards.forEach((card) => {{
+                card.classList.remove('podcast-card-active');
+                card.classList.add('podcast-card');
+            }});
+        }}
+
+        function playNext() {{
+            if (currentIndex >= audioList.length) {{
+                clearHighlights();
+                const buttons = window.parent.document.querySelectorAll('button');
+                for (let btn of buttons) {{
+                    if (btn.innerText.includes('⏹️')) {{
+                        btn.click();
+                        break;
+                    }}
+                }}
+                return;
+            }}
+
+            updateHighlight(currentIndex);
+
+            currentAudio = new Audio('data:audio/mp3;base64,' + audioList[currentIndex]);
+            currentAudio.playbackRate = playbackSpeed; // ⚡ 속도 설정 적용
+            currentAudio.play();
+
+            currentAudio.onended = function() {{
+                currentIndex++;
+                playNext();
+            }};
+        }}
+
+        playNext();
+    </script>
+    """
+    st.components.v1.html(js_code, height=0, width=0)
 
 
 def generate_podcast_script(level, topic_input, podcast_type, previous_topics):
@@ -266,7 +370,7 @@ def generate_podcast_script(level, topic_input, podcast_type, previous_topics):
     return json.loads(response.text)
 
 
-# --- 사이드바 (이전 대본 목록 관리) ---
+# --- 사이드바 ---
 with st.sidebar:
     st.title("🎧 팟캐스트 스튜디오")
     st.divider()
@@ -319,7 +423,6 @@ with st.sidebar:
 # --- 메인 화면 ---
 st.title("🎧 팟캐스트 생성")
 
-# 대본 설정 헤더 및 접기/열기 버튼 (모바일 1줄 고정)
 head_col1, head_col2 = st.columns([75, 25])
 with head_col1:
     st.subheader("⚙️ 대본 설정")
@@ -333,7 +436,6 @@ with head_col2:
         st.session_state.show_settings = not st.session_state.show_settings
         st.rerun()
 
-# 설정 UI 영역
 if st.session_state.show_settings:
     col1, col2 = st.columns(2)
     with col1:
@@ -397,7 +499,6 @@ if st.session_state.show_settings:
 
 st.divider()
 
-# --- 대본 출력 및 오디오/번역 영역 ---
 podcast = st.session_state.current_podcast
 if podcast:
     st.markdown(f"### 📻 {podcast['title']}")
@@ -406,12 +507,31 @@ if podcast:
     )
 
     # ==========================================
-    # 🎧 전체 대본 통합 오디오 재생기 (Edge-TTS 적용)
+    # ⚡ 오디오 재생 속도 컨트롤러 추가
+    # ==========================================
+    speed_col1, speed_col2 = st.columns([60, 40])
+    with speed_col1:
+        st.markdown("**⚡ 재생 속도 설정**")
+    with speed_col2:
+        speed_options = [0.8, 1.0, 1.2, 1.5]
+        selected_speed = st.select_slider(
+            "재생 속도",
+            options=speed_options,
+            value=st.session_state.audio_speed,
+            format_func=lambda x: f"x{x}",
+            label_visibility="collapsed",
+        )
+        if selected_speed != st.session_state.audio_speed:
+            st.session_state.audio_speed = selected_speed
+            st.rerun()
+
+    # ==========================================
+    # 🎧 전체 대본 연속 재생기 (속도 + 하이라이트)
     # ==========================================
     full_audio_key = "full_podcast_audio"
     col_full_card, col_full_btn = st.columns([85, 15])
     with col_full_card:
-        st.markdown("**🎙️ 전체 대본 한 번에 듣기 (Edge-TTS)**")
+        st.markdown(f"**🎙️ 전체 대본 한 번에 듣기 (속도: x{st.session_state.audio_speed})**")
     with col_full_btn:
         is_playing_full = st.session_state.active_audio_key == full_audio_key
         full_btn_label = "⏹️" if is_playing_full else "🎧"
@@ -425,29 +545,39 @@ if podcast:
                 st.session_state.active_audio_key = full_audio_key
             st.rerun()
 
-    # 전체 오디오 순차 생성 및 재생 (says 문구 제거 및 화자별 음성 전환)
     if st.session_state.active_audio_key == full_audio_key:
-        with st.spinner("다중 화자 고품질 오디오 생성 중..."):
-            audio_fp = generate_edge_audio_full(podcast["script"])
-            if audio_fp:
-                st.audio(audio_fp, format="audio/mp3", autoplay=True)
+        with st.spinner("문장별 오디오 생성 및 재생 준비 중..."):
+            audio_chunks = generate_all_audio_chunks(podcast["script"])
+            if audio_chunks:
+                play_continuous_audio_with_highlight(
+                    audio_chunks, speed=st.session_state.audio_speed
+                )
 
     st.divider()
 
     # ==========================================
-    # 📜 문장별 대본 카드 및 재생/돋보기 버튼
+    # 📜 문장별 대본 카드
     # ==========================================
     for idx, item in enumerate(podcast["script"]):
         speaker = item.get("speaker", "Speaker")
         text_en = item.get("text_en", "")
         item_audio_key = f"audio_{idx}"
 
+        is_playing_this_sentence = (
+            st.session_state.active_audio_key == item_audio_key
+        )
+        card_class = (
+            "podcast-card-active"
+            if is_playing_this_sentence
+            else "podcast-card"
+        )
+
         col_card, col_audio, col_trans = st.columns([70, 15, 15])
 
         with col_card:
             st.markdown(
                 f"""
-                <div class="podcast-card">
+                <div class="{card_class}" data-script-card="{idx}">
                     <div class="speaker-name">🗣️ {speaker}</div>
                     <div class="script-en">{text_en}</div>
                 </div>
@@ -455,21 +585,18 @@ if podcast:
                 unsafe_allow_html=True,
             )
 
-        # 🔊/⏹️ 문장별 오디오 버튼 (돋보기 좌측)
         with col_audio:
-            is_playing = st.session_state.active_audio_key == item_audio_key
-            audio_btn_label = "⏹️" if is_playing else "🔊"
+            audio_btn_label = "⏹️" if is_playing_this_sentence else "🔊"
 
             if st.button(
                 audio_btn_label, key=f"audio_btn_{idx}", use_container_width=True
             ):
-                if is_playing:
+                if is_playing_this_sentence:
                     st.session_state.active_audio_key = None
                 else:
                     st.session_state.active_audio_key = item_audio_key
                 st.rerun()
 
-        # 🔍 번역 버튼
         with col_trans:
             if st.button(
                 "🔍", key=f"trans_btn_{idx}", use_container_width=True
@@ -480,14 +607,15 @@ if podcast:
                     st.session_state.active_trans_index = idx
                 st.rerun()
 
-        # 현재 선택된 문장 오디오만 재생 (화자에 따른 남/여 voice 적용)
-        if st.session_state.active_audio_key == item_audio_key:
+        if is_playing_this_sentence:
             audio_fp = generate_edge_audio_single(text_en, speaker=speaker)
             if audio_fp:
-                st.audio(audio_fp, format="audio/mp3", autoplay=True)
+                play_hidden_single_audio(
+                    audio_fp, speed=st.session_state.audio_speed
+                )
 
     # ==========================================
-    # 🖤 하단 플로팅 번역 팝업 카드 (닫기 버튼 제거됨)
+    # 🖤 하단 플로팅 번역 팝업 카드
     # ==========================================
     if st.session_state.active_trans_index is not None:
         active_idx = st.session_state.active_trans_index
