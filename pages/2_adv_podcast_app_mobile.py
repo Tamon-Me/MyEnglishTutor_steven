@@ -276,101 +276,47 @@ def play_hidden_single_audio(audio_fp, speed=1.0):
     st.components.v1.html(js_code, height=0, width=0)
 
 
+# ==========================================
+# 1. 안전한 연속 재생 함수 (Iframe 보안 오류 제거)
+# ==========================================
 def play_continuous_audio_with_highlight(script_list, audio_b64_list, speed=1.0, auto_trans=True):
     json_audio = json.dumps(audio_b64_list)
     json_script = json.dumps(script_list, ensure_ascii=False)
 
+    # Iframe 내부에서 안전하게 실행되는 자바스크립트
     js_code = f"""
     <script>
         const audioList = {json_audio};
         const scriptList = {json_script};
         const playbackSpeed = {speed};
-        const autoTransEnabled = {str(auto_trans).lower()};
+        const autoTrans = {str(auto_trans).lower()};
         let currentIndex = 0;
         let currentAudio = null;
 
-        function getTopDoc() {{
-            try {{
-                return window.top.document;
-            }} catch(e) {{
-                return window.parent.document;
-            }}
-        }}
-
-        function updateHighlight(index) {{
-            const doc = getTopDoc();
-            const cards = doc.querySelectorAll('[data-script-card]');
-            
-            cards.forEach((card, idx) => {{
-                if (idx === index) {{
-                    card.classList.remove('podcast-card');
-                    card.classList.add('podcast-card-active');
-                }} else {{
-                    card.classList.remove('podcast-card-active');
-                    card.classList.add('podcast-card');
-                }}
-            }});
-
-            if (autoTransEnabled && scriptList[index]) {{
-                updateFloatingTranslation(scriptList[index].speaker, scriptList[index].text_ko);
-            }}
-        }}
-
-        function updateFloatingTranslation(speaker, textKo) {{
-            const doc = getTopDoc();
-            let floatingCard = doc.querySelector('.bottom-floating-card');
-            
-            if (!floatingCard) {{
-                floatingCard = doc.createElement('div');
-                floatingCard.className = 'bottom-floating-card';
-                doc.body.appendChild(floatingCard);
-            }}
-            
-            floatingCard.innerHTML = `
-                <div class="floating-card-header">
-                    <span class="floating-card-title">🇰🇷 ${{speaker}} 번역</span>
-                </div>
-                <div class="floating-card-body">${{textKo}}</div>
-            `;
-        }}
-
-        function clearHighlights() {{
-            const doc = getTopDoc();
-            const cards = doc.querySelectorAll('[data-script-card]');
-            cards.forEach((card) => {{
-                card.classList.remove('podcast-card-active');
-                card.classList.add('podcast-card');
-            }});
-
-            const floatingCard = doc.querySelector('.bottom-floating-card');
-            if (floatingCard) {{
-                floatingCard.remove();
-            }}
-        }}
-
-        function stopPlaybackAndReset() {{
-            if (currentAudio) {{
-                currentAudio.pause();
-                currentAudio = null;
-            }}
-            clearHighlights();
-            
-            const buttons = getTopDoc().querySelectorAll('button');
-            for (let btn of buttons) {{
-                if (btn.innerText.includes('⏹️')) {{
-                    btn.click();
-                    break;
-                }}
-            }}
-        }}
-
         function playNext() {{
             if (currentIndex >= audioList.length) {{
-                stopPlaybackAndReset();
+                // 전체 재생 종료 시 중지 버튼 클릭 시도 (Iframe 내부에서 safe_click)
+                try {{
+                    const btns = window.parent.document.querySelectorAll('button');
+                    for (let btn of btns) {{
+                        if (btn.innerText.includes('⏹️')) {{
+                            btn.click();
+                            break;
+                        }}
+                    }}
+                }} catch(e) {{
+                    console.log("Parent DOM access limited");
+                }}
                 return;
             }}
 
-            updateHighlight(currentIndex);
+            // 부모 DOM으로 하이라이트 및 번역 메시지 안전 전송 (postMessage)
+            window.parent.postMessage({{
+                type: 'PODCAST_UPDATE',
+                index: currentIndex,
+                script: scriptList[currentIndex],
+                autoTrans: autoTrans
+            }}, '*');
 
             currentAudio = new Audio('data:audio/mp3;base64,' + audioList[currentIndex]);
             currentAudio.playbackRate = playbackSpeed;
@@ -382,17 +328,79 @@ def play_continuous_audio_with_highlight(script_list, audio_b64_list, speed=1.0,
             }};
         }}
 
-        // 언마운트 / 중지 시 자바스크립트 소멸 이벤트 감지하여 하이라이트 즉시 지우기
-        window.addEventListener('unload', function() {{
-            if (currentAudio) currentAudio.pause();
-            clearHighlights();
-        }});
-
         playNext();
     </script>
     """
     st.components.v1.html(js_code, height=0, width=0)
 
+
+# ==========================================
+# 2. 메시지 수신 및 DOM 안전 변경 자바스크립트 (앱 최상단 1회 로드)
+# ==========================================
+st.markdown("""
+<script>
+    // Iframe에서 보낸 안전한 메시지를 받아 부모 DOM의 카드/번역창 변경
+    window.addEventListener('message', function(event) {
+        if (event.data && event.data.type === 'PODCAST_UPDATE') {
+            const idx = event.data.index;
+            const script = event.data.script;
+            const autoTrans = event.data.autoTrans;
+
+            // 1. 카드 하이라이트 변경
+            const cards = document.querySelectorAll('[data-script-card]');
+            cards.forEach((card, i) => {
+                if (i === idx) {
+                    card.classList.remove('podcast-card');
+                    card.classList.add('podcast-card-active');
+                    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                } else {
+                    card.classList.remove('podcast-card-active');
+                    card.classList.add('podcast-card');
+                }
+            });
+
+            // 2. 번역 플로팅 카드 업데이트
+            if (autoTrans && script) {
+                let floatingCard = document.querySelector('.bottom-floating-card');
+                if (!floatingCard) {
+                    floatingCard = document.createElement('div');
+                    floatingCard.className = 'bottom-floating-card';
+                    document.body.appendChild(floatingCard);
+                }
+                floatingCard.innerHTML = `
+                    <div class="floating-card-header">
+                        <span class="floating-card-title">🇰🇷 ${script.speaker} 번역</span>
+                    </div>
+                    <div class="floating-card-body">${script.text_ko}</div>
+                `;
+            }
+        }
+    });
+</script>
+""", unsafe_allow_html=True)
+
+
+# ==========================================
+# 3. 재생 중이 아닐 때 Cleanup 스크립트 (postMessage 기반)
+# ==========================================
+if st.session_state.active_audio_key is None:
+    st.markdown("""
+    <script>
+        (function() {
+            // 하이라이트 제거
+            const cards = document.querySelectorAll('[data-script-card]');
+            cards.forEach((card) => {
+                card.classList.remove('podcast-card-active');
+                card.classList.add('podcast-card');
+            });
+            // 번역창 제거
+            const floatingCard = document.querySelector('.bottom-floating-card');
+            if (floatingCard) {
+                floatingCard.remove();
+            }
+        })();
+    </script>
+    """, unsafe_allow_html=True)
 
 def generate_podcast_script(level, topic_input, podcast_type, previous_topics):
     topic_prompt = (
