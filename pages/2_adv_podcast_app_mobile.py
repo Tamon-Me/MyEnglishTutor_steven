@@ -116,6 +116,12 @@ st.markdown(
         overflow: hidden !important;
         text-overflow: ellipsis !important;
     }
+
+    /* 라디오 버튼 커스텀 스타일 (버튼처럼 컴팩트하게) */
+    div[data-testid="stRadio"] > div {
+        flex-direction: row !important;
+        gap: 8px !important;
+    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -257,7 +263,7 @@ def play_hidden_single_audio(audio_fp, speed=1.0):
     </audio>
     <script>
         var player = document.getElementById('tts_player');
-        player.playbackRate = {speed}; // ⚡ 속도 설정
+        player.playbackRate = {speed};
         player.onended = function() {{
             const buttons = window.parent.document.querySelectorAll('button');
             for (let btn of buttons) {{
@@ -279,7 +285,7 @@ def play_continuous_audio_with_highlight(audio_b64_list, speed=1.0):
     js_code = f"""
     <script>
         const audioList = {json_audio};
-        const playbackSpeed = {speed}; // ⚡ 지정된 재생 속도
+        const playbackSpeed = {speed};
         let currentIndex = 0;
         let currentAudio = null;
 
@@ -323,7 +329,7 @@ def play_continuous_audio_with_highlight(audio_b64_list, speed=1.0):
             updateHighlight(currentIndex);
 
             currentAudio = new Audio('data:audio/mp3;base64,' + audioList[currentIndex]);
-            currentAudio.playbackRate = playbackSpeed; // ⚡ 속도 설정 적용
+            currentAudio.playbackRate = playbackSpeed;
             currentAudio.play();
 
             currentAudio.onended = function() {{
@@ -507,22 +513,34 @@ if podcast:
     )
 
     # ==========================================
-    # ⚡ 오디오 재생 속도 컨트롤러 추가
+    # ⚡ 안정적인 라디오 버튼 형태의 재생 속도 선택기
     # ==========================================
-    speed_col1, speed_col2 = st.columns([60, 40])
+    speed_col1, speed_col2 = st.columns([35, 65])
     with speed_col1:
         st.markdown("**⚡ 재생 속도 설정**")
     with speed_col2:
-        speed_options = [0.8, 1.0, 1.2, 1.5]
-        selected_speed = st.select_slider(
-            "재생 속도",
-            options=speed_options,
-            value=st.session_state.audio_speed,
-            format_func=lambda x: f"x{x}",
-            label_visibility="collapsed",
+        speed_labels = ["0.8x", "1.0x", "1.2x", "1.5x"]
+        speed_values = [0.8, 1.0, 1.2, 1.5]
+
+        # 현재 저장된 속도의 인덱스 찾기
+        current_idx = (
+            speed_values.index(st.session_state.audio_speed)
+            if st.session_state.audio_speed in speed_values
+            else 1
         )
-        if selected_speed != st.session_state.audio_speed:
-            st.session_state.audio_speed = selected_speed
+
+        selected_label = st.radio(
+            "재생 속도",
+            options=speed_labels,
+            index=current_idx,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="radio_audio_speed",
+        )
+
+        new_speed = float(selected_label.replace("x", ""))
+        if new_speed != st.session_state.audio_speed:
+            st.session_state.audio_speed = new_speed
             st.rerun()
 
     # ==========================================
@@ -531,7 +549,9 @@ if podcast:
     full_audio_key = "full_podcast_audio"
     col_full_card, col_full_btn = st.columns([85, 15])
     with col_full_card:
-        st.markdown(f"**🎙️ 전체 대본 한 번에 듣기 (속도: x{st.session_state.audio_speed})**")
+        st.markdown(
+            f"**🎙️️ 전체 대본 한 번에 듣기 (속도: {st.session_state.audio_speed}x)**"
+        )
     with col_full_btn:
         is_playing_full = st.session_state.active_audio_key == full_audio_key
         full_btn_label = "⏹️" if is_playing_full else "🎧"
