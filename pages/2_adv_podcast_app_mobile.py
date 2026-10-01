@@ -712,5 +712,30 @@ if podcast:
             """
             st.markdown(floating_card_html, unsafe_allow_html=True)
 
+        # ==========================================
+        # 🧹 오디오 미재생 시 브라우저 잔상(하이라이트 & 번역창) 강제 정리 Cleanup 스크립트
+        # ==========================================
+        if st.session_state.active_audio_key is None:
+            cleanup_js = """
+            <script>
+                (function() {
+                    const doc = window.parent.document;
+                    
+                    // 1. 노란색 하이라이트 카드 클래스 원복
+                    const cards = doc.querySelectorAll('[data-script-card]');
+                    cards.forEach((card) => {
+                        card.classList.remove('podcast-card-active');
+                        card.classList.add('podcast-card');
+                    });
+
+                    // 2. 전체 재생용 자동 번역 플로팅 카드 제거
+                    const floatingCard = doc.querySelector('.bottom-floating-card');
+                    if (floatingCard) {
+                        floatingCard.remove();
+                    }
+                })();
+            </script>
+            """
+            st.components.v1.html(cleanup_js, height=0, width=0)
 else:
     st.info("상단에서 대본을 생성하거나, 왼쪽 보관함에서 대본을 선택해주세요.")
